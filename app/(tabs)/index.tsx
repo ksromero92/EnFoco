@@ -1,98 +1,181 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+/**
+ * Today screen — main daily board.
+ * Shows greeting, date, progress card and the activity list.
+ * Uses local demo data; will connect to Supabase in a future stage.
+ */
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import {
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-export default function HomeScreen() {
+import { Palette, Spacing } from '@/constants/theme';
+import { ActivityItem } from '@/src/components/today/ActivityItem';
+import { ProgressCard } from '@/src/components/today/ProgressCard';
+import { VoiceButton } from '@/src/components/today/VoiceButton';
+import { DEMO_DAY_SUMMARY, DEMO_USER_NAME } from '@/src/data/demo';
+import type { Activity, CompletionStatus } from '@/src/types/activity';
+
+// Formats today's date as "Domingo, 26 de julio de 2026"
+function formatDate(iso: string): string {
+  const date = new Date(iso + 'T12:00:00');
+  return date.toLocaleDateString('es-MX', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+// Greeting based on current hour
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Buenos días';
+  if (hour < 19) return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+// Recalculates percentage from current activity list (simplified for prototype)
+function recalcPercentage(activities: Activity[]): number {
+  const scoreable = activities.filter((a) => a.countsForScore && a.status !== 'justified');
+  if (scoreable.length === 0) return 0;
+  const points = scoreable.reduce((sum, a) => {
+    if (a.status === 'complete') return sum + 1;
+    if (a.status === 'partial') return sum + 0.5;
+    return sum;
+  }, 0);
+  return Math.round((points / scoreable.length) * 100);
+}
+
+export default function TodayScreen() {
+  const [activities, setActivities] = useState<Activity[]>(DEMO_DAY_SUMMARY.activities);
+
+  const handleToggle = useCallback((id: string, current: CompletionStatus) => {
+    setActivities((prev) =>
+      prev.map((a) => {
+        if (a.id !== id) return a;
+        const next: CompletionStatus = current === 'pending' ? 'complete' : 'pending';
+        return { ...a, status: next };
+      })
+    );
+  }, []);
+
+  const percentage = recalcPercentage(activities);
+  const { date, cycleDay, cycleTotalDays, scheduledMinutes, completedMinutes } =
+    DEMO_DAY_SUMMARY;
+
+  // Derive classification from live percentage (mirrors REQ-CLASS-001 thresholds)
+  const classification =
+    percentage >= 80
+      ? ('complete' as const)
+      : percentage >= 60
+        ? ('acceptable' as const)
+        : percentage >= 40
+          ? ('minimum' as const)
+          : ('lost' as const);
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <StatusBar barStyle="dark-content" backgroundColor={Palette.background} />
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Header ── */}
+        <View style={styles.header}>
+          <Text style={styles.logo}>EnFoco</Text>
+          <Text style={styles.greeting}>
+            {getGreeting()}, {DEMO_USER_NAME}
+          </Text>
+          <Text style={styles.date}>{formatDate(date)}</Text>
+        </View>
+
+        {/* ── Progress card ── */}
+        <ProgressCard
+          percentage={percentage}
+          classification={classification}
+          cycleDay={cycleDay}
+          cycleTotalDays={cycleTotalDays}
+          scheduledMinutes={scheduledMinutes}
+          completedMinutes={completedMinutes}
+        />
+
+        {/* ── Activity list ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Actividades del día</Text>
+          <View style={styles.activityList}>
+            {activities.map((activity) => (
+              <ActivityItem
+                key={activity.id}
+                activity={activity}
+                onToggle={handleToggle}
+              />
+            ))}
+          </View>
+        </View>
+
+        {/* ── Voice placeholder ── */}
+        <VoiceButton />
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  safeArea: {
+    flex: 1,
+    backgroundColor: Palette.background,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  scroll: {
+    flex: 1,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  scrollContent: {
+    padding: Spacing.md,
+    gap: Spacing.md,
+    // Limit content width on wide screens (web)
+    maxWidth: Platform.OS === 'web' ? 680 : undefined,
+    alignSelf: Platform.OS === 'web' ? 'center' : undefined,
+    width: Platform.OS === 'web' ? '100%' : undefined,
+    paddingBottom: Spacing.xxl,
+  },
+  header: {
+    gap: 4,
+    paddingBottom: Spacing.xs,
+  },
+  logo: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: Palette.primary,
+    letterSpacing: -0.5,
+  },
+  greeting: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: Palette.textPrimary,
+    marginTop: Spacing.xs,
+  },
+  date: {
+    fontSize: 14,
+    color: Palette.textSecondary,
+    textTransform: 'capitalize',
+  },
+  section: {
+    gap: Spacing.sm,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Palette.textPrimary,
+  },
+  activityList: {
+    gap: Spacing.sm,
   },
 });
