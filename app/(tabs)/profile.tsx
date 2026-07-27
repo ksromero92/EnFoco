@@ -1,16 +1,65 @@
 /**
- * Profile screen — placeholder.
+ * Profile screen — placeholder with sign-out button.
  * Will show user settings, timezone, cycle config per REQ-ONB-008.
  */
 
-import React from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import { DEMO_USER_NAME } from '@/src/data/demo';
+import { useAuth } from '@/src/features/auth/AuthProvider';
 
 export default function ProfileScreen() {
+  const { user, signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
+
+  // Derive display name from email (before the @)
+  const displayName = user?.email?.split('@')[0] ?? 'Usuario';
+  const initial = displayName.charAt(0).toUpperCase();
+
+  const performSignOut = useCallback(async () => {
+    setSigningOut(true);
+    try {
+      await signOut();
+      // Navigation handled automatically by Stack.Protected guard change
+    } finally {
+      setSigningOut(false);
+    }
+  }, [signOut]);
+
+  const handleSignOut = useCallback(() => {
+    // On web, Alert.alert is not available — use confirm()
+    if (Platform.OS === 'web') {
+      const confirmed = confirm('¿Deseas cerrar sesión?');
+      if (confirmed) {
+        performSignOut();
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Cerrar sesión',
+      '¿Deseas cerrar sesión?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Cerrar sesión',
+          style: 'destructive',
+          onPress: performSignOut,
+        },
+      ],
+    );
+  }, [performSignOut]);
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
@@ -20,16 +69,14 @@ export default function ProfileScreen() {
           <Text style={styles.subtitle}>Configuración y datos de cuenta</Text>
         </View>
 
-        {/* Avatar placeholder */}
+        {/* Avatar + user info */}
         <View style={styles.avatarRow}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarInitial}>
-              {DEMO_USER_NAME.charAt(0).toUpperCase()}
-            </Text>
+            <Text style={styles.avatarInitial}>{initial}</Text>
           </View>
-          <View>
-            <Text style={styles.userName}>{DEMO_USER_NAME}</Text>
-            <Text style={styles.userMeta}>Ciclo actual · Día 1 de 90</Text>
+          <View style={styles.userInfo}>
+            <Text style={styles.userName}>{displayName}</Text>
+            <Text style={styles.userMeta}>{user?.email ?? ''}</Text>
           </View>
         </View>
 
@@ -41,6 +88,25 @@ export default function ProfileScreen() {
             gestionar las preferencias de tu cuenta.
           </Text>
         </View>
+
+        {/* Sign out button */}
+        <Pressable
+          onPress={handleSignOut}
+          disabled={signingOut}
+          style={({ pressed }) => [
+            styles.signOutButton,
+            pressed && !signingOut && styles.signOutPressed,
+            signingOut && styles.signOutDisabled,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Cerrar sesión"
+        >
+          {signingOut ? (
+            <ActivityIndicator size="small" color={Palette.error} />
+          ) : (
+            <Text style={styles.signOutText}>Cerrar sesión</Text>
+          )}
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -105,6 +171,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Palette.textOnPrimary,
   },
+  userInfo: {
+    flex: 1,
+  },
   userName: {
     fontSize: 17,
     fontWeight: '700',
@@ -140,5 +209,24 @@ const styles = StyleSheet.create({
     color: Palette.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
+  },
+  signOutButton: {
+    height: 48,
+    backgroundColor: Palette.errorLight,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 'auto',
+  },
+  signOutPressed: {
+    opacity: 0.7,
+  },
+  signOutDisabled: {
+    opacity: 0.5,
+  },
+  signOutText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Palette.error,
   },
 });
