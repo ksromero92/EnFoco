@@ -1,32 +1,39 @@
 /**
  * Tab layout — 5 main tabs: Hoy, Semana, Progreso, Rutinas, Perfil.
  * Uses HapticTab for iOS haptic feedback and MaterialIcons via IconSymbol.
+ *
+ * Tab bar colors are hardcoded to EnFoco brand values so they are always
+ * visible on the white bar regardless of the OS color scheme.
  */
 
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { Platform } from 'react-native';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { Colors, Palette } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
-  const activeTint = Colors[colorScheme ?? 'light'].tabIconSelected;
-  const inactiveTint = Colors[colorScheme ?? 'light'].tabIconDefault;
+// Explicit brand values — do not derive from colorScheme to avoid invisible
+// active icons on the white tab bar.
+const TAB_ACTIVE_COLOR = '#2563EB';
+const TAB_INACTIVE_COLOR = '#9CA3AF';
+const TAB_BAR_BG = '#FFFFFF';
+const TAB_BORDER_COLOR = '#E2E8F0';
 
+export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: activeTint,
-        tabBarInactiveTintColor: inactiveTint,
         headerShown: false,
         tabBarButton: HapticTab,
+        tabBarActiveTintColor: TAB_ACTIVE_COLOR,
+        tabBarInactiveTintColor: TAB_INACTIVE_COLOR,
         tabBarStyle: {
-          backgroundColor: Palette.surface,
-          borderTopColor: Palette.border,
+          backgroundColor: TAB_BAR_BG,
+          borderTopColor: TAB_BORDER_COLOR,
           borderTopWidth: 1,
+          // Ensure the bar is always opaque on all platforms
+          ...(Platform.OS === 'android' && { elevation: 8 }),
         },
         tabBarLabelStyle: {
           fontSize: 11,

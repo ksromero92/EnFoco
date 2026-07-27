@@ -36,6 +36,15 @@ export interface Activity {
   status: CompletionStatus;
   /** Duration target in minutes (used with 'duration' tracking) */
   durationMinutes: number | null;
+  /**
+   * Minutes actually realized for this activity instance.
+   * Rules for demo data:
+   *   complete  → equals durationMinutes
+   *   pending   → 0
+   *   partial   → explicit value > 0 and < durationMinutes
+   * Used by TodayScreen to compute completedMinutes and percentage.
+   */
+  completedMinutes: number;
 }
 
 export interface DaySummary {

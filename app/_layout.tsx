@@ -18,7 +18,12 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
-      <StatusBar style="auto" />
+      {/*
+       * Always use dark status bar content (dark icons/text) so the clock,
+       * signal, wifi and battery indicators are visible on the light #F8FAFC
+       * background used throughout the app.
+       */}
+      <StatusBar style="dark" backgroundColor="#F8FAFC" translucent={false} />
     </ThemeProvider>
   );
 }

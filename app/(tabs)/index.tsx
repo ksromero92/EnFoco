@@ -8,7 +8,6 @@ import React, { useCallback, useState } from 'react';
 import {
     Platform,
     ScrollView,
-    StatusBar,
     StyleSheet,
     Text,
     View,
@@ -20,20 +19,33 @@ import { ActivityItem } from '@/src/components/today/ActivityItem';
 import { ProgressCard } from '@/src/components/today/ProgressCard';
 import { VoiceButton } from '@/src/components/today/VoiceButton';
 import { DEMO_DAY_SUMMARY, DEMO_USER_NAME } from '@/src/data/demo';
-import type { Activity, CompletionStatus } from '@/src/types/activity';
+import type { Activity, CompletionStatus, DayClassification } from '@/src/types/activity';
 
-// Formats today's date as "Domingo, 26 de julio de 2026"
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Formats an ISO date string as natural Spanish without auto-capitalisation.
+ * e.g. "lunes, 27 de julio de 2026"
+ *
+ * toLocaleDateString can return "Lunes, …" on some runtimes; we lowercase
+ * the first character explicitly instead of using textTransform so the result
+ * is always "lunes, …" regardless of locale runtime differences.
+ */
 function formatDate(iso: string): string {
   const date = new Date(iso + 'T12:00:00');
-  return date.toLocaleDateString('es-MX', {
+  const raw = date.toLocaleDateString('es-MX', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   });
+  // Lowercase first character — weekday names should not be capitalised in Spanish
+  return raw.charAt(0).toLowerCase() + raw.slice(1);
 }
 
-// Greeting based on current hour
+/** Greeting based on current hour */
 function getGreeting(): string {
   const hour = new Date().getHours();
   if (hour < 12) return 'Buenos días';
@@ -41,49 +53,86 @@ function getGreeting(): string {
   return 'Buenas noches';
 }
 
-// Recalculates percentage from current activity list (simplified for prototype)
-function recalcPercentage(activities: Activity[]): number {
+// ---------------------------------------------------------------------------
+// Minute-based recalculation
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns live stats derived purely from activity minutes.
+ *
+ * Formula (per requirements):
+ *   percentage = round( completedMinutes / scheduledMinutes × 100 )
+ *
+ * When toggling an activity:
+ *   pending  → complete: completedMinutes += durationMinutes
+ *   complete → pending:  completedMinutes -= durationMinutes
+ *   partial stays read-only in this prototype
+ *
+ * Division by zero is handled by returning 0 %.
+ */
+function calcStats(activities: Activity[]): {
+  percentage: number;
+  completedMinutes: number;
+  pendingMinutes: number;
+  scheduledMinutes: number;
+  classification: DayClassification;
+} {
   const scoreable = activities.filter((a) => a.countsForScore && a.status !== 'justified');
-  if (scoreable.length === 0) return 0;
-  const points = scoreable.reduce((sum, a) => {
-    if (a.status === 'complete') return sum + 1;
-    if (a.status === 'partial') return sum + 0.5;
-    return sum;
-  }, 0);
-  return Math.round((points / scoreable.length) * 100);
+
+  const scheduledMinutes = scoreable.reduce((s, a) => s + (a.durationMinutes ?? 0), 0);
+  const completedMinutes = scoreable.reduce((s, a) => s + (a.completedMinutes ?? 0), 0);
+  const pendingMinutes = scheduledMinutes - completedMinutes;
+
+  const percentage =
+    scheduledMinutes > 0 ? Math.round((completedMinutes / scheduledMinutes) * 100) : 0;
+
+  const classification: DayClassification =
+    percentage >= 80
+      ? 'complete'
+      : percentage >= 60
+        ? 'acceptable'
+        : percentage >= 40
+          ? 'minimum'
+          : 'lost';
+
+  return { percentage, completedMinutes, pendingMinutes, scheduledMinutes, classification };
 }
+
+// ---------------------------------------------------------------------------
+// Screen
+// ---------------------------------------------------------------------------
 
 export default function TodayScreen() {
   const [activities, setActivities] = useState<Activity[]>(DEMO_DAY_SUMMARY.activities);
 
+  /**
+   * Toggles an activity between pending ↔ complete.
+   * Updates completedMinutes so all stats recalculate consistently.
+   * Partial activities are not toggleable in this prototype.
+   */
   const handleToggle = useCallback((id: string, current: CompletionStatus) => {
     setActivities((prev) =>
       prev.map((a) => {
         if (a.id !== id) return a;
-        const next: CompletionStatus = current === 'pending' ? 'complete' : 'pending';
-        return { ...a, status: next };
+        if (current === 'pending') {
+          return { ...a, status: 'complete' as const, completedMinutes: a.durationMinutes ?? 0 };
+        }
+        if (current === 'complete') {
+          return { ...a, status: 'pending' as const, completedMinutes: 0 };
+        }
+        // partial — not toggleable yet
+        return a;
       })
     );
   }, []);
 
-  const percentage = recalcPercentage(activities);
-  const { date, cycleDay, cycleTotalDays, scheduledMinutes, completedMinutes } =
-    DEMO_DAY_SUMMARY;
+  const { percentage, completedMinutes, pendingMinutes, scheduledMinutes, classification } =
+    calcStats(activities);
 
-  // Derive classification from live percentage (mirrors REQ-CLASS-001 thresholds)
-  const classification =
-    percentage >= 80
-      ? ('complete' as const)
-      : percentage >= 60
-        ? ('acceptable' as const)
-        : percentage >= 40
-          ? ('minimum' as const)
-          : ('lost' as const);
+  const { date, cycleDay, cycleTotalDays } = DEMO_DAY_SUMMARY;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor={Palette.background} />
-
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -106,6 +155,7 @@ export default function TodayScreen() {
           cycleTotalDays={cycleTotalDays}
           scheduledMinutes={scheduledMinutes}
           completedMinutes={completedMinutes}
+          pendingMinutes={pendingMinutes}
         />
 
         {/* ── Activity list ── */}
@@ -165,7 +215,7 @@ const styles = StyleSheet.create({
   date: {
     fontSize: 14,
     color: Palette.textSecondary,
-    textTransform: 'capitalize',
+    // No textTransform — lowercasing is handled in formatDate()
   },
   section: {
     gap: Spacing.sm,

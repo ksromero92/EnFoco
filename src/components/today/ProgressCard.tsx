@@ -16,6 +16,8 @@ interface Props {
   cycleTotalDays: number;
   scheduledMinutes: number;
   completedMinutes: number;
+  /** Pre-computed pending minutes (scheduledMinutes - completedMinutes) */
+  pendingMinutes: number;
 }
 
 // Classification labels and colors (mirrors REQ-CLASS-001 thresholds)
@@ -44,6 +46,7 @@ export function ProgressCard({
   cycleTotalDays,
   scheduledMinutes,
   completedMinutes,
+  pendingMinutes,
 }: Props) {
   const config = CLASSIFICATION_CONFIG[classification];
   const clampedPct = Math.min(100, Math.max(0, percentage));
@@ -80,7 +83,7 @@ export function ProgressCard({
         </View>
         <View style={styles.timeDivider} />
         <View style={styles.timeStat}>
-          <Text style={styles.timeValue}>{formatMinutes(scheduledMinutes - completedMinutes)}</Text>
+          <Text style={styles.timeValue}>{formatMinutes(pendingMinutes)}</Text>
           <Text style={styles.timeLabel}>pendientes</Text>
         </View>
         <View style={styles.timeDivider} />

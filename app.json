@@ -51,6 +51,12 @@
         "projectId": "b7d5520f-4571-42fa-9028-226569b0c7b3"
       }
     },
-    "owner": "kromerop"
+    "owner": "kromerop",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/b7d5520f-4571-42fa-9028-226569b0c7b3"
+    }
   }
 }
