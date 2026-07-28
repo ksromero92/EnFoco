@@ -4,18 +4,18 @@
  * activities and entering minutes for duration-tracked ones.
  */
 
-import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Modal,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -27,22 +27,22 @@ import { useAuth } from '@/src/features/auth/AuthProvider';
 import { useProfile } from '@/src/features/profile/ProfileProvider';
 import type { CycleRow, TodayItem } from '@/src/features/today/today-service';
 import {
-    buildTodayItems,
-    getActiveCycleForDate,
-    getActivitiesForCycle,
-    getCategoriesByIds,
-    getLogsForDate,
-    getSchedulesForWeekday,
-    upsertLog,
+  buildTodayItems,
+  getActiveCycleForDate,
+  getActivitiesForCycle,
+  getCategoriesByIds,
+  getLogsForDate,
+  getSchedulesForWeekday,
+  upsertLog,
 } from '@/src/features/today/today-service';
 import {
-    classifyDay,
-    formatDateSpanish,
-    getCycleDay,
-    getCycleTotalDays,
-    getGreeting,
-    getTodayDate,
-    getTodayWeekday,
+  classifyDay,
+  formatDateSpanish,
+  getCycleDay,
+  getCycleTotalDays,
+  getGreeting,
+  getTodayDate,
+  getTodayWeekday,
 } from '@/src/features/today/today-utils';
 
 // ---------------------------------------------------------------------------
@@ -73,29 +73,33 @@ export default function TodayScreen() {
 
   // ─── Load data ──────────────────────────────────────────────────────────
 
-  const loadData = useCallback(async () => {
+  const hasMounted = useRef(false);
+
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!user) return;
-    setLoading(true);
+    const silent = options?.silent ?? false;
+
+    if (!silent) setLoading(true);
     setError(null);
 
     const { data: cycleData, error: cycleErr } = await getActiveCycleForDate(user.id, todayDate);
     if (cycleErr) {
-      setError('No se pudo cargar el ciclo activo.');
-      setLoading(false);
+      if (!silent) setError('No se pudo cargar el ciclo activo.');
+      if (!silent) setLoading(false);
       return;
     }
     setCycle(cycleData);
 
     if (!cycleData) {
       setItems([]);
-      setLoading(false);
+      if (!silent) setLoading(false);
       return;
     }
 
     const { data: activities, error: actErr } = await getActivitiesForCycle(user.id, cycleData.id);
     if (actErr) {
-      setError('No se pudieron cargar las actividades.');
-      setLoading(false);
+      if (!silent) setError('No se pudieron cargar las actividades.');
+      if (!silent) setLoading(false);
       return;
     }
 
@@ -103,8 +107,8 @@ export default function TodayScreen() {
 
     const { data: schedules, error: schedErr } = await getSchedulesForWeekday(user.id, activityIds, weekday);
     if (schedErr) {
-      setError('No se pudieron cargar los horarios.');
-      setLoading(false);
+      if (!silent) setError('No se pudieron cargar los horarios.');
+      if (!silent) setLoading(false);
       return;
     }
 
@@ -115,15 +119,15 @@ export default function TodayScreen() {
 
     const { data: categories, error: catErr } = await getCategoriesByIds(user.id, categoryIds);
     if (catErr) {
-      setError('No se pudieron cargar las categorías.');
-      setLoading(false);
+      if (!silent) setError('No se pudieron cargar las categorías.');
+      if (!silent) setLoading(false);
       return;
     }
 
     const { data: logs, error: logErr } = await getLogsForDate(user.id, scheduledActivityIds, todayDate);
     if (logErr) {
-      setError('No se pudieron cargar los registros del día.');
-      setLoading(false);
+      if (!silent) setError('No se pudieron cargar los registros del día.');
+      if (!silent) setLoading(false);
       return;
     }
 
@@ -132,9 +136,19 @@ export default function TodayScreen() {
     setLoading(false);
   }, [user, todayDate, weekday]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // Refresh every time this tab gains focus
+  useFocusEffect(
+    useCallback(() => {
+      if (hasMounted.current) {
+        // Silent refresh on subsequent focuses — keep existing UI visible
+        loadData({ silent: true });
+      } else {
+        // First mount — show full loading
+        hasMounted.current = true;
+        loadData();
+      }
+    }, [loadData]),
+  );
 
   // ─── Progress calculation ───────────────────────────────────────────────
 
@@ -277,7 +291,7 @@ export default function TodayScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.centered}>
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable onPress={loadData} style={styles.retryBtn}>
+          <Pressable onPress={() => loadData()} style={styles.retryBtn}>
             <Text style={styles.retryBtnText}>Reintentar</Text>
           </Pressable>
         </View>
