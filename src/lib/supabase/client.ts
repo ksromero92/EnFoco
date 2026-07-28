@@ -19,6 +19,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+
 import { authStorage } from './auth-storage';
 
 // ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ if (!supabaseAnonKey) {
 // Client instance
 // ---------------------------------------------------------------------------
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: authStorage,
     autoRefreshToken: true,

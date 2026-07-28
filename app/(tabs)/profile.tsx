@@ -1,6 +1,6 @@
 /**
- * Profile screen — placeholder with sign-out button.
- * Will show user settings, timezone, cycle config per REQ-ONB-008.
+ * Profile screen — shows real user data from public.profiles.
+ * Displays full_name, email, timezone, and sign-out button.
  */
 
 import React, { useCallback, useState } from 'react';
@@ -17,27 +17,27 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Palette, Radius, Spacing } from '@/constants/theme';
 import { useAuth } from '@/src/features/auth/AuthProvider';
+import { useProfile } from '@/src/features/profile/ProfileProvider';
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
+  const { profile } = useProfile();
   const [signingOut, setSigningOut] = useState(false);
 
-  // Derive display name from email (before the @)
-  const displayName = user?.email?.split('@')[0] ?? 'Usuario';
+  // Use full_name from profile, fallback to email prefix
+  const displayName = profile?.full_name ?? user?.email?.split('@')[0] ?? 'Usuario';
   const initial = displayName.charAt(0).toUpperCase();
 
   const performSignOut = useCallback(async () => {
     setSigningOut(true);
     try {
       await signOut();
-      // Navigation handled automatically by Stack.Protected guard change
     } finally {
       setSigningOut(false);
     }
   }, [signOut]);
 
   const handleSignOut = useCallback(() => {
-    // On web, Alert.alert is not available — use confirm()
     if (Platform.OS === 'web') {
       const confirmed = confirm('¿Deseas cerrar sesión?');
       if (confirmed) {
@@ -77,6 +77,9 @@ export default function ProfileScreen() {
           <View style={styles.userInfo}>
             <Text style={styles.userName}>{displayName}</Text>
             <Text style={styles.userMeta}>{user?.email ?? ''}</Text>
+            {profile?.timezone ? (
+              <Text style={styles.userTimezone}>{profile.timezone}</Text>
+            ) : null}
           </View>
         </View>
 
@@ -181,6 +184,11 @@ const styles = StyleSheet.create({
   },
   userMeta: {
     fontSize: 13,
+    color: Palette.textSecondary,
+    marginTop: 2,
+  },
+  userTimezone: {
+    fontSize: 12,
     color: Palette.textSecondary,
     marginTop: 2,
   },
