@@ -14,6 +14,229 @@ export type Database = {
   }
   public: {
     Tables: {
+      activities: {
+        Row: {
+          category_id: string
+          created_at: string
+          cycle_id: string
+          default_duration_minutes: number | null
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          target_value: number | null
+          tracking_type: string
+          unit: string | null
+          updated_at: string
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          cycle_id: string
+          default_duration_minutes?: number | null
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          target_value?: number | null
+          tracking_type?: string
+          unit?: string | null
+          updated_at?: string
+          user_id: string
+          weight?: number
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          cycle_id?: string
+          default_duration_minutes?: number | null
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          target_value?: number | null
+          tracking_type?: string
+          unit?: string | null
+          updated_at?: string
+          user_id?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "activities_category_fk"
+            columns: ["category_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "activities_cycle_fk"
+            columns: ["cycle_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "cycles"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
+      activity_logs: {
+        Row: {
+          activity_id: string
+          completed_minutes: number | null
+          completed_value: number | null
+          created_at: string
+          id: string
+          log_date: string
+          note: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          activity_id: string
+          completed_minutes?: number | null
+          completed_value?: number | null
+          created_at?: string
+          id?: string
+          log_date: string
+          note?: string | null
+          status: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          activity_id?: string
+          completed_minutes?: number | null
+          completed_value?: number | null
+          created_at?: string
+          id?: string
+          log_date?: string
+          note?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "logs_activity_fk"
+            columns: ["activity_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "activities"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
+      activity_schedules: {
+        Row: {
+          activity_id: string
+          created_at: string
+          duration_minutes: number | null
+          id: string
+          start_time: string | null
+          updated_at: string
+          user_id: string
+          weekday: number
+        }
+        Insert: {
+          activity_id: string
+          created_at?: string
+          duration_minutes?: number | null
+          id?: string
+          start_time?: string | null
+          updated_at?: string
+          user_id: string
+          weekday: number
+        }
+        Update: {
+          activity_id?: string
+          created_at?: string
+          duration_minutes?: number | null
+          id?: string
+          start_time?: string | null
+          updated_at?: string
+          user_id?: string
+          weekday?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "schedules_activity_fk"
+            columns: ["activity_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "activities"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
+      categories: {
+        Row: {
+          color: string
+          created_at: string
+          icon: string | null
+          id: string
+          is_active: boolean
+          name: string
+          position: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          icon?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          position?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          icon?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          position?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      cycles: {
+        Row: {
+          created_at: string
+          end_date: string
+          id: string
+          name: string
+          start_date: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          end_date: string
+          id?: string
+          name: string
+          start_date: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          end_date?: string
+          id?: string
+          name?: string
+          start_date?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -46,7 +269,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      seed_new_user_data: { Args: { p_user_id: string }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never
