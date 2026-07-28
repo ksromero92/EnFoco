@@ -1,72 +1,111 @@
 /**
  * ActivityItem — a single row in the today board.
- * Tapping the status button toggles between pending ↔ complete.
- * Partial status is read-only in this prototype (future: tap to enter value).
+ * Supports boolean toggle (tap pill) and minutes input (tap pill opens modal
+ * handled by the parent). Shows a loading indicator when saving.
  */
 
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Palette, Radius, Spacing } from '@/constants/theme';
-import type { Activity, CompletionStatus } from '@/src/types/activity';
 
-interface Props {
-  activity: Activity;
-  onToggle: (id: string, current: CompletionStatus) => void;
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type ItemStatus = 'pending' | 'partial' | 'completed';
+
+export interface TodayActivityProps {
+  id: string;
+  name: string;
+  categoryName: string;
+  categoryColor: string;
+  startTime: string | null;
+  scheduledMinutes: number;
+  trackingType: string;
+  status: ItemStatus;
+  completedMinutes: number;
+  saving?: boolean;
+  onPress: (id: string) => void;
 }
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 const STATUS_CONFIG: Record<
-  CompletionStatus,
+  ItemStatus,
   { label: string; dotColor: string; bgColor: string; textColor: string }
 > = {
-  complete:  { label: 'Completa',  dotColor: Palette.complete,  bgColor: Palette.completeLight, textColor: Palette.complete  },
-  partial:   { label: 'Parcial',   dotColor: Palette.partial,   bgColor: Palette.partialLight,  textColor: Palette.partial   },
-  pending:   { label: 'Pendiente', dotColor: Palette.pending,   bgColor: Palette.pendingLight,  textColor: Palette.textSecondary },
-  justified: { label: 'Justif.',   dotColor: Palette.primary,   bgColor: Palette.primaryLight,  textColor: Palette.primary   },
+  completed: { label: 'Completa', dotColor: Palette.complete, bgColor: Palette.completeLight, textColor: Palette.complete },
+  partial:   { label: 'Parcial',  dotColor: Palette.partial,  bgColor: Palette.partialLight,  textColor: Palette.partial  },
+  pending:   { label: 'Pendiente', dotColor: Palette.pending, bgColor: Palette.pendingLight,  textColor: Palette.textSecondary },
 };
 
-export function ActivityItem({ activity, onToggle }: Props) {
-  const config = STATUS_CONFIG[activity.status];
-  const isToggleable = activity.status === 'pending' || activity.status === 'complete';
+export function ActivityItem({
+  id,
+  name,
+  categoryName,
+  categoryColor,
+  startTime,
+  scheduledMinutes,
+  trackingType,
+  status,
+  completedMinutes,
+  saving = false,
+  onPress,
+}: TodayActivityProps) {
+  const config = STATUS_CONFIG[status];
+
+  const timeLabel = startTime ? startTime.slice(0, 5) : null;
+  const durationLabel = scheduledMinutes > 0 ? `${scheduledMinutes} min` : null;
+  const minutesInfo =
+    trackingType === 'minutes' && status === 'partial'
+      ? `${completedMinutes}/${scheduledMinutes} min`
+      : null;
 
   return (
     <View style={styles.container}>
-      {/* Category color stripe */}
-      <View style={[styles.stripe, { backgroundColor: activity.categoryColor }]} />
+      <View style={[styles.stripe, { backgroundColor: categoryColor }]} />
 
-      {/* Main content */}
       <View style={styles.content}>
         <View style={styles.topLine}>
-          <Text style={styles.name} numberOfLines={1}>{activity.name}</Text>
+          <Text style={styles.name} numberOfLines={1}>{name}</Text>
 
-          {/* Status pill — tappable if pending or complete */}
           <Pressable
-            onPress={() => isToggleable && onToggle(activity.id, activity.status)}
+            onPress={() => !saving && onPress(id)}
+            disabled={saving}
             style={({ pressed }) => [
               styles.statusPill,
               { backgroundColor: config.bgColor },
-              pressed && isToggleable && styles.pillPressed,
+              pressed && !saving && styles.pillPressed,
             ]}
-            accessibilityLabel={`Estado de ${activity.name}: ${config.label}. ${isToggleable ? 'Toca para cambiar.' : ''}`}
+            accessibilityLabel={`Estado de ${name}: ${config.label}. Toca para cambiar.`}
             accessibilityRole="button"
           >
-            <View style={[styles.statusDot, { backgroundColor: config.dotColor }]} />
+            {saving ? (
+              <ActivityIndicator size={10} color={config.dotColor} />
+            ) : (
+              <View style={[styles.statusDot, { backgroundColor: config.dotColor }]} />
+            )}
             <Text style={[styles.statusText, { color: config.textColor }]}>{config.label}</Text>
           </Pressable>
         </View>
 
         <View style={styles.bottomLine}>
-          <Text style={styles.category}>{activity.category}</Text>
-          {activity.startTime && activity.endTime && (
-            <Text style={styles.time}>
-              {activity.startTime}–{activity.endTime}
-            </Text>
-          )}
+          <Text style={styles.category}>{categoryName}</Text>
+          {timeLabel && <Text style={styles.meta}>{timeLabel}</Text>}
+          {durationLabel && <Text style={styles.meta}>{durationLabel}</Text>}
+          {minutesInfo && <Text style={styles.meta}>{minutesInfo}</Text>}
         </View>
       </View>
     </View>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
   container: {
@@ -74,7 +113,6 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.surface,
     borderRadius: Radius.md,
     overflow: 'hidden',
-    // Subtle shadow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -126,12 +164,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
+    flexWrap: 'wrap',
   },
   category: {
     fontSize: 13,
     color: Palette.textSecondary,
   },
-  time: {
+  meta: {
     fontSize: 13,
     color: Palette.textSecondary,
   },
