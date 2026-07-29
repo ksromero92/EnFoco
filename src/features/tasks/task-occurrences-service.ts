@@ -106,6 +106,24 @@ export async function updateTaskCompletion(
 }
 
 /**
+ * Get all task_occurrences for a date range, ordered by date then position.
+ */
+export async function getTasksForRange(userId: string, dateFrom: string, dateTo: string) {
+  const { data, error } = await supabase
+    .from('task_occurrences')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('planned_date', dateFrom)
+    .lte('planned_date', dateTo)
+    .order('planned_date', { ascending: true })
+    .order('position', { ascending: true })
+    .order('start_time', { ascending: true, nullsFirst: false })
+    .order('title', { ascending: true });
+
+  return { data: data ?? [], error };
+}
+
+/**
  * Reorder all tasks for a date using the RPC that assigns positions atomically.
  * The order of IDs in the array determines the final position (1000, 2000, ...).
  */

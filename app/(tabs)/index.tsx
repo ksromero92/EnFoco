@@ -31,6 +31,7 @@ import {
   getActiveCycle,
   getCategoriesByIds,
   getTasksForDate,
+  reorderTasksForDate,
   syncToActivityLog,
   updateTaskCompletion
 } from '@/src/features/tasks/task-occurrences-service';
