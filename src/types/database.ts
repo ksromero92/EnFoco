@@ -264,6 +264,113 @@ export type Database = {
         }
         Relationships: []
       }
+      task_occurrences: {
+        Row: {
+          activity_id: string | null
+          category_id: string
+          completed_minutes: number | null
+          completed_value: number | null
+          created_at: string
+          cycle_id: string
+          details: string | null
+          id: string
+          note: string | null
+          planned_date: string
+          planned_minutes: number
+          position: number
+          schedule_id: string | null
+          source: string
+          start_time: string | null
+          status: string
+          target_value: number | null
+          title: string
+          tracking_type: string
+          unit: string | null
+          updated_at: string
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          activity_id?: string | null
+          category_id: string
+          completed_minutes?: number | null
+          completed_value?: number | null
+          created_at?: string
+          cycle_id: string
+          details?: string | null
+          id?: string
+          note?: string | null
+          planned_date: string
+          planned_minutes: number
+          position?: number
+          schedule_id?: string | null
+          source?: string
+          start_time?: string | null
+          status?: string
+          target_value?: number | null
+          title: string
+          tracking_type?: string
+          unit?: string | null
+          updated_at?: string
+          user_id: string
+          weight?: number
+        }
+        Update: {
+          activity_id?: string | null
+          category_id?: string
+          completed_minutes?: number | null
+          completed_value?: number | null
+          created_at?: string
+          cycle_id?: string
+          details?: string | null
+          id?: string
+          note?: string | null
+          planned_date?: string
+          planned_minutes?: number
+          position?: number
+          schedule_id?: string | null
+          source?: string
+          start_time?: string | null
+          status?: string
+          target_value?: number | null
+          title?: string
+          tracking_type?: string
+          unit?: string | null
+          updated_at?: string
+          user_id?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_occ_activity_fk"
+            columns: ["activity_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "activities"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "task_occ_category_fk"
+            columns: ["category_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "task_occ_cycle_fk"
+            columns: ["cycle_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "cycles"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "task_occ_schedule_fk"
+            columns: ["schedule_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "activity_schedules"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
