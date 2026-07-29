@@ -399,6 +399,10 @@ export type Database = {
         Args: { p_source_cycle_id: string; p_target_cycle_id: string }
         Returns: number
       }
+      ensure_task_occurrences: {
+        Args: { p_date_from: string; p_date_to: string }
+        Returns: number
+      }
       seed_new_user_data: { Args: { p_user_id: string }; Returns: undefined }
       start_new_cycle: {
         Args: { p_duration_days: number; p_name: string; p_start_date: string }
