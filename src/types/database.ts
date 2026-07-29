@@ -269,7 +269,45 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      archive_cycle: {
+        Args: { p_cycle_id: string }
+        Returns: {
+          created_at: string
+          end_date: string
+          id: string
+          name: string
+          start_date: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cycles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       seed_new_user_data: { Args: { p_user_id: string }; Returns: undefined }
+      start_new_cycle: {
+        Args: { p_duration_days: number; p_name: string; p_start_date: string }
+        Returns: {
+          created_at: string
+          end_date: string
+          id: string
+          name: string
+          start_date: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cycles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       [_ in never]: never
