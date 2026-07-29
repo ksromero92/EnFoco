@@ -7,19 +7,20 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Palette, Radius, Spacing } from '@/constants/theme';
+import { TimezonePickerField } from '@/src/components/forms/TimezonePickerField';
 import { useProfile } from '@/src/features/profile/ProfileProvider';
 
 // ---------------------------------------------------------------------------
@@ -137,20 +138,11 @@ export default function OnboardingScreen() {
             {/* Timezone field */}
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>Zona horaria</Text>
-              <TextInput
-                style={styles.input}
+              <TimezonePickerField
                 value={timezone}
-                onChangeText={setTimezone}
-                placeholder="America/Bogota"
-                placeholderTextColor={Palette.textSecondary}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!saving}
-                accessibilityLabel="Zona horaria"
+                onChange={setTimezone}
+                disabled={saving}
               />
-              <Text style={styles.hint}>
-                Detectada automáticamente. Puedes cambiarla si es incorrecta.
-              </Text>
             </View>
 
             {/* Submit button */}

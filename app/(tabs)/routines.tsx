@@ -10,8 +10,8 @@
 // ---------------------------------------------------------------------------
 
 
-import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -46,6 +46,9 @@ import {
   updateActivity
 } from '@/src/features/routines/routines-service';
 
+import { DurationPickerField } from '@/src/components/forms/DurationPickerField';
+import { TimePickerField } from '@/src/components/forms/TimePickerField';
+
 const WEEKDAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 const TRACKING_OPTIONS = [
   { value: 'boolean', label: 'Confirmación' },
@@ -71,6 +74,7 @@ function formatTime(time: string | null): string {
 
 export default function RoutinesScreen() {
   const { user } = useAuth();
+  const router = useRouter();
 
   const [cycle, setCycle] = useState<Cycle | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -288,6 +292,12 @@ export default function RoutinesScreen() {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Header />
 
+        {/* Manage categories link */}
+        <Pressable onPress={() => router.push('/categories')} style={styles.manageCatBtn} accessibilityRole="button">
+          <Text style={styles.manageCatText}>Gestionar categorías</Text>
+          <Text style={styles.manageCatChevron}>›</Text>
+        </Pressable>
+
         {/* Tab: Activas / Inactivas */}
         {inactiveActivities.length > 0 && (
           <View style={styles.tabRow}>
@@ -504,10 +514,10 @@ function ActivityForm({ visible, cycle, categories, userId, editingActivity, onC
 
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [duration, setDuration] = useState('30');
+  const [duration, setDuration] = useState(30);
   const [trackingType, setTrackingType] = useState<'boolean' | 'minutes'>('boolean');
   const [selectedDays, setSelectedDays] = useState<boolean[]>([true, true, true, true, true, false, false]);
-  const [startTime, setStartTime] = useState('');
+  const [startTime, setStartTime] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
@@ -521,7 +531,7 @@ function ActivityForm({ visible, cycle, categories, userId, editingActivity, onC
     if (editingActivity) {
       setName(editingActivity.name);
       setCategoryId(editingActivity.category_id);
-      setDuration(String(editingActivity.default_duration_minutes ?? 30));
+      setDuration(editingActivity.default_duration_minutes ?? 30);
       setTrackingType(editingActivity.tracking_type === 'minutes' ? 'minutes' : 'boolean');
 
       // Load existing schedules
@@ -534,16 +544,16 @@ function ActivityForm({ visible, cycle, categories, userId, editingActivity, onC
           if (s.start_time && !time) time = s.start_time.slice(0, 5);
         }
         setSelectedDays(days);
-        setStartTime(time);
+        setStartTime(time || null);
         setLoadingSchedules(false);
       });
     } else {
       setName('');
       setCategoryId(categories[0]?.id ?? '');
-      setDuration('30');
+      setDuration(30);
       setTrackingType('boolean');
       setSelectedDays([true, true, true, true, true, false, false]);
-      setStartTime('');
+      setStartTime(null);
     }
   }, [visible, editingActivity, userId, categories]);
 
@@ -557,11 +567,9 @@ function ActivityForm({ visible, cycle, categories, userId, editingActivity, onC
     const trimmedName = name.trim();
     if (!trimmedName) { setError('El nombre es obligatorio.'); return; }
     if (!categoryId) { setError('Selecciona una categoría.'); return; }
-    const durationNum = parseInt(duration, 10);
-    if (isNaN(durationNum) || durationNum < 1 || durationNum > 1440) { setError('La duración debe ser entre 1 y 1440 minutos.'); return; }
+    const durationNum = duration;
+    if (durationNum < 1 || durationNum > 1440) { setError('La duración debe ser entre 1 y 1440 minutos.'); return; }
     if (!selectedDays.some(Boolean)) { setError('Selecciona al menos un día de la semana.'); return; }
-    const trimmedTime = startTime.trim();
-    if (trimmedTime && !/^\d{2}:\d{2}$/.test(trimmedTime)) { setError('La hora debe tener formato HH:mm.'); return; }
 
     setSaving(true);
 
@@ -577,7 +585,7 @@ function ActivityForm({ visible, cycle, categories, userId, editingActivity, onC
 
       // Sync schedules
       const { error: syncErr } = await syncSchedules(
-        userId, editingActivity.id, selectedDays, trimmedTime || null, durationNum,
+        userId, editingActivity.id, selectedDays, startTime, durationNum,
       );
       if (syncErr) { setError('No se pudieron actualizar los horarios.'); setSaving(false); return; }
 
@@ -599,7 +607,7 @@ function ActivityForm({ visible, cycle, categories, userId, editingActivity, onC
       if (actError || !activity) { setError('No se pudo crear la actividad.'); setSaving(false); return; }
 
       const scheduleInputs = selectedDays
-        .map((sel, i) => sel ? { user_id: userId, activity_id: activity.id, weekday: i + 1, start_time: trimmedTime || null, duration_minutes: durationNum } : null)
+        .map((sel, i) => sel ? { user_id: userId, activity_id: activity.id, weekday: i + 1, start_time: startTime, duration_minutes: durationNum } : null)
         .filter((s): s is NonNullable<typeof s> => s !== null);
 
       const { error: schedError } = await createSchedules(scheduleInputs);
@@ -644,8 +652,8 @@ function ActivityForm({ visible, cycle, categories, userId, editingActivity, onC
             </View>
 
             <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Duración (minutos)</Text>
-              <TextInput style={styles.input} value={duration} onChangeText={setDuration} placeholder="30" placeholderTextColor={Palette.textSecondary} keyboardType="numeric" editable={!saving} accessibilityLabel="Duración" />
+              <Text style={styles.label}>Duración</Text>
+              <DurationPickerField value={duration} onChange={setDuration} disabled={saving} />
             </View>
 
             {/* Tracking type — only for new activities */}
@@ -674,8 +682,8 @@ function ActivityForm({ visible, cycle, categories, userId, editingActivity, onC
             </View>
 
             <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Hora de inicio (opcional)</Text>
-              <TextInput style={styles.input} value={startTime} onChangeText={setStartTime} placeholder="07:00" placeholderTextColor={Palette.textSecondary} keyboardType="numbers-and-punctuation" editable={!saving} accessibilityLabel="Hora" />
+              <Text style={styles.label}>Hora de inicio</Text>
+              <TimePickerField value={startTime} onChange={setStartTime} disabled={saving} />
             </View>
 
             <Pressable onPress={handleSave} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && !saving && styles.saveBtnPressed, saving && styles.saveBtnDisabled]} accessibilityRole="button" accessibilityLabel="Guardar">
@@ -743,6 +751,11 @@ const styles = StyleSheet.create({
   chevron: { fontSize: 20, color: Palette.textSecondary, marginLeft: Spacing.sm },
   inactiveBadge: { backgroundColor: Palette.pendingLight, borderRadius: Radius.full, paddingHorizontal: 8, paddingVertical: 2 },
   inactiveBadgeText: { fontSize: 11, fontWeight: '600', color: Palette.textSecondary },
+
+  // Manage categories
+  manageCatBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Palette.surface, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm + 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1 },
+  manageCatText: { fontSize: 14, fontWeight: '500', color: Palette.primary },
+  manageCatChevron: { fontSize: 18, color: Palette.primary },
 
   // New button
   newBtn: { height: 48, backgroundColor: Palette.primary, borderRadius: Radius.sm, alignItems: 'center', justifyContent: 'center' },

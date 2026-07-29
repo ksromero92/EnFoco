@@ -21,6 +21,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Palette, Radius, Spacing } from '@/constants/theme';
+import { TimezonePickerField } from '@/src/components/forms/TimezonePickerField';
 import { useAuth } from '@/src/features/auth/AuthProvider';
 import { useProfile } from '@/src/features/profile/ProfileProvider';
 import type { Cycle } from '@/src/features/routines/routines-service';
@@ -262,12 +263,6 @@ function EditProfileModal({ visible, currentName, currentTimezone, updateProfile
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Detect device timezone for suggestion
-  const deviceTz = useRef<string>('');
-  if (!deviceTz.current) {
-    try { deviceTz.current = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* ignore */ }
-  }
-
   // Reset on open
   React.useEffect(() => {
     if (visible) {
@@ -312,12 +307,7 @@ function EditProfileModal({ visible, currentName, currentTimezone, updateProfile
 
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>Zona horaria</Text>
-              <TextInput style={styles.input} value={tz} onChangeText={setTz} placeholder="America/Bogota" placeholderTextColor={Palette.textSecondary} autoCapitalize="none" autoCorrect={false} editable={!saving} accessibilityLabel="Zona horaria" />
-              {deviceTz.current && deviceTz.current !== tz && (
-                <Pressable onPress={() => setTz(deviceTz.current)} disabled={saving}>
-                  <Text style={styles.suggestion}>Usar zona detectada: {deviceTz.current}</Text>
-                </Pressable>
-              )}
+              <TimezonePickerField value={tz} onChange={setTz} disabled={saving} />
             </View>
 
             <Pressable onPress={handleSave} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && !saving && styles.saveBtnPressed, saving && styles.saveBtnDisabled]} accessibilityRole="button" accessibilityLabel="Guardar">
