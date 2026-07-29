@@ -3,20 +3,20 @@
  * Connected to Supabase via ProfileProvider and routines-service.
  */
 
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -66,6 +66,7 @@ function isValidTimezone(tz: string): boolean {
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const { profile, updateProfile } = useProfile();
+  const router = useRouter();
   const timezone = profile?.timezone ?? 'America/Bogota';
 
   const [cycle, setCycle] = useState<Cycle | null>(null);
@@ -216,6 +217,9 @@ export default function ProfileScreen() {
               </View>
             </View>
           )}
+          <Pressable onPress={() => router.push('/cycles')} style={({ pressed }) => [styles.editBtn, pressed && styles.editBtnPressed]} accessibilityRole="button" accessibilityLabel="Administrar ciclos">
+            <Text style={styles.editBtnText}>Administrar ciclos</Text>
+          </Pressable>
         </View>
 
         {/* ── Cuenta ── */}

@@ -81,6 +81,7 @@ function RootNavigator() {
         <Stack.Protected guard={onboardingComplete}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="categories" options={{ presentation: 'modal', title: 'Categorías' }} />
+          <Stack.Screen name="cycles" options={{ presentation: 'modal', title: 'Ciclos' }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack.Protected>
       </Stack>
