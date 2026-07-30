@@ -225,3 +225,26 @@ export async function reorderTasksForDate(plannedDate: string, orderedTaskIds: s
   });
   return { updated: (data as number | null) ?? 0, error };
 }
+
+/**
+ * Move a pending task to another date via RPC.
+ * For recurring tasks, creates an exception so it won't regenerate.
+ */
+export async function moveTaskOccurrence(taskId: string, targetDate: string) {
+  const { data, error } = await supabase.rpc('move_task_occurrence', {
+    p_task_id: taskId,
+    p_target_date: targetDate,
+  });
+  return { data: data as TaskOccurrence | null, error };
+}
+
+/**
+ * Delete a task from its day via RPC.
+ * For recurring tasks, creates a skipped exception.
+ */
+export async function deleteTaskOccurrenceForDay(taskId: string) {
+  const { data, error } = await supabase.rpc('delete_task_occurrence_for_day', {
+    p_task_id: taskId,
+  });
+  return { success: data as boolean | null, error };
+}

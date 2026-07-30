@@ -5,6 +5,7 @@
  */
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { Picker } from '@react-native-picker/picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
 import {
@@ -19,8 +20,10 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Sortable from 'react-native-sortables';
 
 import { Palette, Radius, Spacing } from '@/constants/theme';
+import { CategoryIcon } from '@/src/components/categories/CategoryIcon';
 import { DurationPickerField } from '@/src/components/forms/DurationPickerField';
 import { TimePickerField } from '@/src/components/forms/TimePickerField';
 import { ProgressCard } from '@/src/components/today/ProgressCard';
@@ -30,7 +33,7 @@ import { useProfile } from '@/src/features/profile/ProfileProvider';
 import type { TaskOccurrence } from '@/src/features/tasks/task-occurrences-service';
 import {
   createTaskOccurrence,
-  deleteTaskOccurrence,
+  deleteTaskOccurrenceForDay,
   ensureTaskOccurrences,
   getActiveActivitiesForCycle,
   getActiveCategories,
@@ -38,6 +41,7 @@ import {
   getCategoriesByIds,
   getMaxPosition,
   getTasksForDate,
+  moveTaskOccurrence,
   reorderTasksForDate,
   updateTaskCompletion,
   updateTaskOccurrence
@@ -87,6 +91,7 @@ export default function TodayScreen() {
   const [duplicatingTask, setDuplicatingTask] = useState<TaskOccurrence | null>(null);
   const [deleteTask, setDeleteTask] = useState<TaskOccurrence | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [moveTask, setMoveTask] = useState<TaskOccurrence | null>(null);
 
   const hasMounted = useRef(false);
 
@@ -206,66 +211,50 @@ export default function TodayScreen() {
     setMinutesTask(null);
   }, [user, minutesTask, minutesInput, minutesSaving]);
 
-  // ─── Reorder handlers ──────────────────────────────────────────────────
+  // ─── Task actions ────────────────────────────────────────────────────────
 
-  const handleMoveUp = useCallback(async (taskId: string) => {
-    if (!user || savingId) return;
-    const idx = tasks.findIndex((t) => t.id === taskId);
-    if (idx <= 0) return;
+  const openTaskActions = useCallback((task: TaskOccurrence) => {
+    setActionTask(task);
+  }, []);
 
-    // Build new order by swapping idx and idx-1
-    const newOrder = tasks.map((t) => t.id);
-    [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx]!, newOrder[idx - 1]!];
+  // ─── Drag-and-drop ─────────────────────────────────────────────────────
 
-    setSavingId(taskId);
-    const { error: err } = await reorderTasksForDate(todayDate, newOrder);
-    if (err) { setSavingId(null); return; }
+  const handleDragEnd = useCallback(async ({ data }: { data: TaskOccurrence[] }) => {
+    if (savingId) return;
+    const orderedIds = data.map((t) => t.id);
+    const previousTasks = [...tasks];
 
-    // Apply new order locally (assign sequential positions to match)
-    const reordered = newOrder
-      .map((id, i) => {
-        const t = tasks.find((x) => x.id === id);
-        return t ? { ...t, position: (i + 1) * 1000 } : null;
-      })
-      .filter((t): t is TaskOccurrence => t !== null);
-    setTasks(reordered);
+    // Optimistic update
+    setTasks(data.map((t, i) => ({ ...t, position: (i + 1) * 1000 })));
+    setSavingId('reordering');
+
+    const { error: err } = await reorderTasksForDate(todayDate, orderedIds);
     setSavingId(null);
-  }, [user, savingId, tasks, todayDate]);
 
-  const handleMoveDown = useCallback(async (taskId: string) => {
-    if (!user || savingId) return;
-    const idx = tasks.findIndex((t) => t.id === taskId);
-    if (idx < 0 || idx >= tasks.length - 1) return;
-
-    // Build new order by swapping idx and idx+1
-    const newOrder = tasks.map((t) => t.id);
-    [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1]!, newOrder[idx]!];
-
-    setSavingId(taskId);
-    const { error: err } = await reorderTasksForDate(todayDate, newOrder);
-    if (err) { setSavingId(null); return; }
-
-    const reordered = newOrder
-      .map((id, i) => {
-        const t = tasks.find((x) => x.id === id);
-        return t ? { ...t, position: (i + 1) * 1000 } : null;
-      })
-      .filter((t): t is TaskOccurrence => t !== null);
-    setTasks(reordered);
-    setSavingId(null);
-  }, [user, savingId, tasks, todayDate]);
+    if (err) {
+      setTasks(previousTasks);
+    }
+  }, [tasks, savingId, todayDate]);
 
   // ─── CRUD handlers ─────────────────────────────────────────────────────
 
   const handleDelete = useCallback(async () => {
     if (!user || !deleteTask || deleting) return;
     setDeleting(true);
-    const { error: err } = await deleteTaskOccurrence(user.id, deleteTask.id);
+    const { error: err } = await deleteTaskOccurrenceForDay(deleteTask.id);
     if (err) { setDeleting(false); return; }
     setDeleteTask(null);
     setDeleting(false);
     await loadData({ silent: true });
   }, [user, deleteTask, deleting, loadData]);
+
+  const handleMove = useCallback(async (targetDate: string) => {
+    if (!moveTask) return;
+    const { error: err } = await moveTaskOccurrence(moveTask.id, targetDate);
+    if (err) { return; }
+    setMoveTask(null);
+    await loadData({ silent: true });
+  }, [moveTask, loadData]);
 
   const handleCreateSaved = useCallback(async () => {
     setCreateMode(null);
@@ -338,66 +327,60 @@ export default function TodayScreen() {
         {tasks.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Tareas del día</Text>
-            <View style={styles.taskList}>
-              {tasks.map((task, idx) => {
-                const cat = catMap.get(task.category_id);
-                const statusLabel = task.status === 'completed' ? 'Completa' : task.status === 'partial' ? 'Parcial' : 'Pendiente';
-                const statusColor = task.status === 'completed' ? Palette.complete : task.status === 'partial' ? Palette.partial : Palette.pending;
-                const statusBg = task.status === 'completed' ? Palette.completeLight : task.status === 'partial' ? Palette.partialLight : Palette.pendingLight;
-                const isSaving = savingId === task.id;
+            <View style={styles.sortableContainer}>
+              <Sortable.Grid
+                customHandle
+                columns={1}
+                data={tasks}
+                keyExtractor={(item) => item.id}
+                onDragEnd={handleDragEnd}
+                dragActivationDelay={200}
+                activeItemScale={1.02}
+                activeItemOpacity={0.9}
+                activeItemShadowOpacity={0.2}
+                inactiveItemOpacity={0.7}
+                rowGap={Spacing.sm}
+                renderItem={({ item: task }) => {
+                  const cat = catMap.get(task.category_id);
+                  const statusLabel = task.status === 'completed' ? 'Completa' : task.status === 'partial' ? 'Parcial' : 'Pendiente';
+                  const statusColor = task.status === 'completed' ? Palette.complete : task.status === 'partial' ? Palette.partial : Palette.pending;
+                  const statusBg = task.status === 'completed' ? Palette.completeLight : task.status === 'partial' ? Palette.partialLight : Palette.pendingLight;
 
-                return (
-                  <Pressable key={task.id} onLongPress={() => setActionTask(task)} style={styles.taskRow}>
-                    {/* Category stripe */}
-                    <View style={[styles.stripe, { backgroundColor: cat?.color ?? Palette.primary }]} />
-                    <View style={styles.taskContent}>
-                      <View style={styles.taskTop}>
-                        <Text style={styles.taskTitle} numberOfLines={1}>{task.title}</Text>
-                        {/* Status pill */}
-                        <Pressable
-                          onPress={() => !isSaving && handlePress(task.id)}
-                          disabled={isSaving}
-                          style={[styles.pill, { backgroundColor: statusBg }]}
-                        >
-                          {isSaving ? (
-                            <ActivityIndicator size={10} color={statusColor} />
-                          ) : (
-                            <View style={[styles.dot, { backgroundColor: statusColor }]} />
+                  return (
+                    <View style={styles.taskRow}>
+                      <Sortable.Handle>
+                        <View style={styles.dragHandle} accessibilityLabel="Arrastrar para cambiar el orden" accessibilityRole="button">
+                          <MaterialIcons name="drag-indicator" size={20} color={Palette.textSecondary} />
+                        </View>
+                      </Sortable.Handle>
+                      <View style={[styles.stripe, { backgroundColor: cat?.color ?? Palette.primary }]} />
+                      <View style={styles.taskContent}>
+                        <View style={styles.taskTop}>
+                          <Sortable.Touchable onTap={() => { if (savingId) return; handlePress(task.id); }} style={styles.taskTitleWrap}>
+                            <Text style={styles.taskTitle} numberOfLines={1}>{task.title}</Text>
+                          </Sortable.Touchable>
+                          <Sortable.Touchable onTap={() => { if (savingId) return; handlePress(task.id); }} style={[styles.pill, { backgroundColor: statusBg }, savingId === task.id && styles.pillDisabled]}>
+                            {savingId === task.id ? <ActivityIndicator size={10} color={statusColor} /> : <View style={[styles.dot, { backgroundColor: statusColor }]} />}
+                            <Text style={[styles.pillText, { color: statusColor }]}>{statusLabel}</Text>
+                          </Sortable.Touchable>
+                          <Sortable.Touchable onTap={() => openTaskActions(task)} style={styles.moreBtn} accessibilityLabel="Abrir acciones de la tarea" accessibilityRole="button">
+                            <MaterialIcons name="more-horiz" size={20} color={Palette.textSecondary} />
+                          </Sortable.Touchable>
+                        </View>
+                        {task.details ? <Text style={styles.detailsText} numberOfLines={2}>{task.details}</Text> : null}
+                        <View style={styles.taskMeta}>
+                          {cat && <Text style={styles.metaText}>{cat.name}</Text>}
+                          {task.start_time && <Text style={styles.metaText}>{task.start_time.slice(0, 5)}</Text>}
+                          <Text style={styles.metaText}>{task.planned_minutes} min</Text>
+                          {task.tracking_type === 'minutes' && task.status === 'partial' && (
+                            <Text style={styles.metaText}>{task.completed_minutes}/{task.planned_minutes}</Text>
                           )}
-                          <Text style={[styles.pillText, { color: statusColor }]}>{statusLabel}</Text>
-                        </Pressable>
-                      </View>
-                      <View style={styles.taskMeta}>
-                        {cat && <Text style={styles.metaText}>{cat.name}</Text>}
-                        {task.start_time && <Text style={styles.metaText}>{task.start_time.slice(0, 5)}</Text>}
-                        <Text style={styles.metaText}>{task.planned_minutes} min</Text>
-                        {task.tracking_type === 'minutes' && task.status === 'partial' && (
-                          <Text style={styles.metaText}>{task.completed_minutes}/{task.planned_minutes}</Text>
-                        )}
-                      </View>
-                      {/* Reorder buttons */}
-                      <View style={styles.orderRow}>
-                        <Pressable
-                          onPress={() => handleMoveUp(task.id)}
-                          disabled={idx === 0 || isSaving}
-                          style={[styles.orderBtn, idx === 0 && styles.orderBtnDisabled]}
-                          accessibilityLabel="Subir"
-                        >
-                          <MaterialIcons name="keyboard-arrow-up" size={18} color={idx === 0 ? Palette.border : Palette.textSecondary} />
-                        </Pressable>
-                        <Pressable
-                          onPress={() => handleMoveDown(task.id)}
-                          disabled={idx === tasks.length - 1 || isSaving}
-                          style={[styles.orderBtn, idx === tasks.length - 1 && styles.orderBtnDisabled]}
-                          accessibilityLabel="Bajar"
-                        >
-                          <MaterialIcons name="keyboard-arrow-down" size={18} color={idx === tasks.length - 1 ? Palette.border : Palette.textSecondary} />
-                        </Pressable>
+                        </View>
                       </View>
                     </View>
-                  </Pressable>
-                );
-              })}
+                  );
+                }}
+              />
             </View>
           </View>
         )}
@@ -420,7 +403,10 @@ export default function TodayScreen() {
               <Text style={styles.actionTitle}>{actionTask.title}</Text>
               <Pressable onPress={() => { setEditingTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Editar</Text></Pressable>
               <Pressable onPress={() => { setDuplicatingTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Duplicar</Text></Pressable>
-              <Pressable onPress={() => { setDeleteTask(actionTask); setActionTask(null); }} style={[styles.actionBtn, styles.actionBtnDanger]}><Text style={styles.actionBtnDangerText}>Eliminar</Text></Pressable>
+              {actionTask.status === 'pending' && (
+                <Pressable onPress={() => { setMoveTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Mover a otro día</Text></Pressable>
+              )}
+              <Pressable onPress={() => { setDeleteTask(actionTask); setActionTask(null); }} style={[styles.actionBtn, styles.actionBtnDanger]}><Text style={styles.actionBtnDangerText}>Eliminar del día</Text></Pressable>
               <Pressable onPress={() => setActionTask(null)} style={styles.actionBtn}><Text style={[styles.actionBtnText, { color: Palette.textSecondary }]}>Cancelar</Text></Pressable>
             </View>
           </Pressable>
@@ -433,7 +419,11 @@ export default function TodayScreen() {
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Eliminar tarea</Text>
-              <Text style={styles.modalSub}>¿Eliminar &ldquo;{deleteTask.title}&rdquo; de hoy?</Text>
+              <Text style={styles.modalSub}>
+                {deleteTask.schedule_id
+                  ? 'Esta tarea se eliminará únicamente de este día. La rutina y sus próximas repeticiones continuarán.'
+                  : 'Esta tarea se eliminará de tu agenda.'}
+              </Text>
               <View style={styles.modalActions}>
                 <Pressable onPress={() => setDeleteTask(null)} disabled={deleting} style={styles.modalCancel}><Text style={styles.modalCancelText}>Cancelar</Text></Pressable>
                 <Pressable onPress={handleDelete} disabled={deleting} style={[styles.modalSave, { backgroundColor: Palette.error }]}><Text style={styles.modalSaveText}>{deleting ? '...' : 'Eliminar'}</Text></Pressable>
@@ -441,6 +431,11 @@ export default function TodayScreen() {
             </View>
           </View>
         </Modal>
+      )}
+
+      {/* Move task modal */}
+      {moveTask && (
+        <MoveTaskModal task={moveTask} cycle={cycle} onClose={() => setMoveTask(null)} onMove={handleMove} />
       )}
 
       {/* Create mode selector */}
@@ -457,10 +452,10 @@ export default function TodayScreen() {
         </Modal>
       )}
       {createMode === 'routine' && (
-        <CreateFromRoutineModal userId={user?.id ?? ''} cycleId={cycle?.id ?? ''} todayDate={todayDate} onClose={() => setCreateMode(null)} onSaved={handleCreateSaved} />
+        <CreateFromRoutineModal userId={user?.id ?? ''} cycleId={cycle?.id ?? ''} cycleStart={cycle?.start_date ?? todayDate} cycleEnd={cycle?.end_date ?? todayDate} todayDate={todayDate} onClose={() => setCreateMode(null)} onSaved={handleCreateSaved} />
       )}
       {createMode === 'oneoff' && (
-        <CreateOneOffModal userId={user?.id ?? ''} cycleId={cycle?.id ?? ''} todayDate={todayDate} onClose={() => setCreateMode(null)} onSaved={handleCreateSaved} />
+        <CreateOneOffModal userId={user?.id ?? ''} cycleId={cycle?.id ?? ''} cycleStart={cycle?.start_date ?? todayDate} cycleEnd={cycle?.end_date ?? todayDate} todayDate={todayDate} onClose={() => setCreateMode(null)} onSaved={handleCreateSaved} />
       )}
 
       {/* Edit / Duplicate modal */}
@@ -511,6 +506,51 @@ export default function TodayScreen() {
 }
 
 // ---------------------------------------------------------------------------
+// MoveTaskModal
+// ---------------------------------------------------------------------------
+
+function MoveTaskModal({ task, cycle, onClose, onMove }: { task: TaskOccurrence; cycle: Cycle | null; onClose: () => void; onMove: (date: string) => void }) {
+  const [year, setYear] = useState(() => parseInt(task.planned_date.slice(0, 4), 10));
+  const [month, setMonth] = useState(() => parseInt(task.planned_date.slice(5, 7), 10));
+  const [day, setDay] = useState(() => parseInt(task.planned_date.slice(8, 10), 10));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const maxDay = new Date(year, month, 0).getDate();
+  const effectiveDay = Math.min(day, maxDay);
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(effectiveDay).padStart(2, '0')}`;
+
+  const handleMove = useCallback(async () => {
+    if (saving) return;
+    if (dateStr === task.planned_date) { setError('Selecciona una fecha diferente.'); return; }
+    if (cycle && (dateStr < cycle.start_date || dateStr > cycle.end_date)) { setError('La fecha debe estar dentro del ciclo.'); return; }
+    setSaving(true); setError(null);
+    onMove(dateStr);
+  }, [saving, dateStr, task.planned_date, cycle, onMove]);
+
+  const years = cycle ? [parseInt(cycle.start_date.slice(0, 4), 10), parseInt(cycle.end_date.slice(0, 4), 10)] : [year];
+  const uniqueYears = [...new Set(years)];
+
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.formHeader}><Text style={styles.formTitle}>Mover a otro día</Text><Pressable onPress={onClose}><Text style={styles.formCancel}>Cancelar</Text></Pressable></View>
+          <Text style={styles.moveWarning}>Esta tarea se moverá únicamente para esta ocasión. La rutina original no cambiará.</Text>
+          {error && <View style={styles.errorBox}><Text style={styles.errorBoxText}>{error}</Text></View>}
+          <View style={styles.dateRow}>
+            <View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={year} onValueChange={(v: number) => setYear(Number(v))} style={styles.pickerInner}>{uniqueYears.map((y) => <Picker.Item key={y} label={String(y)} value={y} />)}</Picker></View></View>
+            <View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={month} onValueChange={(v: number) => setMonth(Number(v))} style={styles.pickerInner}>{Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <Picker.Item key={m} label={String(m).padStart(2, '0')} value={m} />)}</Picker></View></View>
+            <View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={effectiveDay} onValueChange={(v: number) => setDay(Number(v))} style={styles.pickerInner}>{Array.from({ length: maxDay }, (_, i) => i + 1).map((d) => <Picker.Item key={d} label={String(d).padStart(2, '0')} value={d} />)}</Picker></View></View>
+          </View>
+          <Pressable onPress={handleMove} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && !saving && styles.saveBtnPressed, saving && styles.saveBtnDisabled]}><Text style={styles.saveBtnText}>{saving ? 'Moviendo...' : 'Mover'}</Text></Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
 
@@ -518,13 +558,14 @@ export default function TodayScreen() {
 // CreateFromRoutineModal
 // ---------------------------------------------------------------------------
 
-function CreateFromRoutineModal({ userId, cycleId, todayDate, onClose, onSaved }: { userId: string; cycleId: string; todayDate: string; onClose: () => void; onSaved: () => void }) {
+function CreateFromRoutineModal({ userId, cycleId, cycleStart, cycleEnd, todayDate, onClose, onSaved }: { userId: string; cycleId: string; cycleStart: string; cycleEnd: string; todayDate: string; onClose: () => void; onSaved: () => void }) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedAct, setSelectedAct] = useState<Activity | null>(null);
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
   const [duration, setDuration] = useState(30);
   const [startTime, setStartTime] = useState<string | null>(null);
+  const [plannedDate, setPlannedDate] = useState(todayDate);
   const [loadingActs, setLoadingActs] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -551,11 +592,11 @@ function CreateFromRoutineModal({ userId, cycleId, todayDate, onClose, onSaved }
     if (!trimmed) { setError('El título es obligatorio.'); return; }
     if (duration < 1 || duration > 1440) { setError('Duración inválida.'); return; }
     setSaving(true); setError(null);
-    const maxPos = await getMaxPosition(userId, todayDate);
+    const maxPos = await getMaxPosition(userId, plannedDate);
     const { error: err } = await createTaskOccurrence({
       user_id: userId, cycle_id: cycleId, activity_id: selectedAct.id, schedule_id: null,
       category_id: selectedAct.category_id, title: trimmed, details: details.trim() || null,
-      planned_date: todayDate, planned_minutes: duration, start_time: startTime,
+      planned_date: plannedDate, planned_minutes: duration, start_time: startTime,
       tracking_type: selectedAct.tracking_type, target_value: selectedAct.target_value,
       unit: selectedAct.unit, weight: selectedAct.weight,
       source: 'manual', status: 'pending', completed_value: null, completed_minutes: null, note: null,
@@ -564,7 +605,7 @@ function CreateFromRoutineModal({ userId, cycleId, todayDate, onClose, onSaved }
     setSaving(false);
     if (err) { setError('No se pudo crear la tarea.'); return; }
     onSaved();
-  }, [selectedAct, title, details, duration, startTime, userId, cycleId, todayDate, saving, onSaved]);
+  }, [selectedAct, title, details, duration, startTime, userId, cycleId, plannedDate, saving, onSaved]);
 
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet">
@@ -583,6 +624,14 @@ function CreateFromRoutineModal({ userId, cycleId, todayDate, onClose, onSaved }
             <View style={styles.fieldGroup}><Text style={styles.label}>Detalle (opcional)</Text><TextInput style={styles.input} value={details} onChangeText={setDetails} editable={!saving} /></View>
             <View style={styles.fieldGroup}><Text style={styles.label}>Duración</Text><DurationPickerField value={duration} onChange={setDuration} disabled={saving} /></View>
             <View style={styles.fieldGroup}><Text style={styles.label}>Hora de inicio</Text><TimePickerField value={startTime} onChange={setStartTime} disabled={saving} /></View>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Fecha</Text>
+              <View style={styles.dateRow}>
+                <View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(0, 4), 10)} onValueChange={(v) => { const nd = `${v}-${plannedDate.slice(5)}`; if (nd >= todayDate && nd >= cycleStart && nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{[parseInt(cycleStart.slice(0, 4), 10), parseInt(cycleEnd.slice(0, 4), 10)].filter((v, i, a) => a.indexOf(v) === i).map((y) => <Picker.Item key={y} label={String(y)} value={y} />)}</Picker></View></View>
+                <View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(5, 7), 10)} onValueChange={(v) => { const nd = `${plannedDate.slice(0, 5)}${String(v).padStart(2, '0')}-${plannedDate.slice(8)}`; if (nd >= todayDate && nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <Picker.Item key={m} label={String(m).padStart(2, '0')} value={m} />)}</Picker></View></View>
+                <View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(8, 10), 10)} onValueChange={(v) => { const nd = `${plannedDate.slice(0, 8)}${String(v).padStart(2, '0')}`; if (nd >= todayDate && nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{Array.from({ length: 31 }, (_, i) => i + 1).map((d) => <Picker.Item key={d} label={String(d).padStart(2, '0')} value={d} />)}</Picker></View></View>
+              </View>
+            </View>
             <Pressable onPress={handleSave} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && !saving && styles.saveBtnPressed, saving && styles.saveBtnDisabled]}>{saving ? <ActivityIndicator color={Palette.textOnPrimary} size="small" /> : <Text style={styles.saveBtnText}>Guardar</Text>}</Pressable>
           </>)}
         </ScrollView>
@@ -595,7 +644,7 @@ function CreateFromRoutineModal({ userId, cycleId, todayDate, onClose, onSaved }
 // CreateOneOffModal
 // ---------------------------------------------------------------------------
 
-function CreateOneOffModal({ userId, cycleId, todayDate, onClose, onSaved }: { userId: string; cycleId: string; todayDate: string; onClose: () => void; onSaved: () => void }) {
+function CreateOneOffModal({ userId, cycleId, cycleStart, cycleEnd, todayDate, onClose, onSaved }: { userId: string; cycleId: string; cycleStart: string; cycleEnd: string; todayDate: string; onClose: () => void; onSaved: () => void }) {
   const [cats, setCats] = useState<Category[]>([]);
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
@@ -603,6 +652,7 @@ function CreateOneOffModal({ userId, cycleId, todayDate, onClose, onSaved }: { u
   const [trackingType, setTrackingType] = useState<'boolean' | 'minutes'>('boolean');
   const [duration, setDuration] = useState(30);
   const [startTime, setStartTime] = useState<string | null>(null);
+  const [plannedDate, setPlannedDate] = useState(todayDate);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -621,11 +671,11 @@ function CreateOneOffModal({ userId, cycleId, todayDate, onClose, onSaved }: { u
     if (!categoryId) { setError('Selecciona una categoría.'); return; }
     if (duration < 1 || duration > 1440) { setError('Duración inválida.'); return; }
     setSaving(true); setError(null);
-    const maxPos = await getMaxPosition(userId, todayDate);
+    const maxPos = await getMaxPosition(userId, plannedDate);
     const { error: err } = await createTaskOccurrence({
       user_id: userId, cycle_id: cycleId, activity_id: null, schedule_id: null,
       category_id: categoryId, title: trimmed, details: details.trim() || null,
-      planned_date: todayDate, planned_minutes: duration, start_time: startTime,
+      planned_date: plannedDate, planned_minutes: duration, start_time: startTime,
       tracking_type: trackingType, target_value: trackingType === 'minutes' ? duration : null,
       unit: trackingType === 'minutes' ? 'min' : null, weight: 1,
       source: 'one_off', status: 'pending', completed_value: null, completed_minutes: null, note: null,
@@ -634,7 +684,7 @@ function CreateOneOffModal({ userId, cycleId, todayDate, onClose, onSaved }: { u
     setSaving(false);
     if (err) { setError('No se pudo crear la tarea.'); return; }
     onSaved();
-  }, [title, details, categoryId, trackingType, duration, startTime, userId, cycleId, todayDate, saving, onSaved]);
+  }, [title, details, categoryId, trackingType, duration, startTime, userId, cycleId, plannedDate, saving, onSaved]);
 
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet">
@@ -644,10 +694,11 @@ function CreateOneOffModal({ userId, cycleId, todayDate, onClose, onSaved }: { u
           {error && <View style={styles.errorBox}><Text style={styles.errorBoxText}>{error}</Text></View>}
           <View style={styles.fieldGroup}><Text style={styles.label}>Título</Text><TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="Nombre de la tarea" placeholderTextColor={Palette.textSecondary} editable={!saving} /></View>
           <View style={styles.fieldGroup}><Text style={styles.label}>Detalle (opcional)</Text><TextInput style={styles.input} value={details} onChangeText={setDetails} editable={!saving} /></View>
-          <View style={styles.fieldGroup}><Text style={styles.label}>Categoría</Text><View style={styles.chipRow}>{cats.map((c) => (<Pressable key={c.id} onPress={() => setCategoryId(c.id)} disabled={saving} style={[styles.chip, categoryId === c.id && styles.chipSelected]}><Text style={[styles.chipText, categoryId === c.id && styles.chipTextSelected]}>{c.name}</Text></Pressable>))}</View></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Categoría</Text><View style={styles.chipRow}>{cats.map((c) => (<Pressable key={c.id} onPress={() => setCategoryId(c.id)} disabled={saving} style={[styles.chip, categoryId === c.id && { backgroundColor: c.color + '22', borderColor: c.color }]}><CategoryIcon icon={c.icon} color={c.color} size={24} /><Text style={[styles.chipText, categoryId === c.id && { color: c.color }]}>{c.name}</Text></Pressable>))}{cats.length === 0 && <Text style={styles.metaText}>Necesitas una categoría activa para crear esta tarea.</Text>}</View></View>
           <View style={styles.fieldGroup}><Text style={styles.label}>Seguimiento</Text><View style={styles.chipRow}><Pressable onPress={() => setTrackingType('boolean')} style={[styles.chip, trackingType === 'boolean' && styles.chipSelected]}><Text style={[styles.chipText, trackingType === 'boolean' && styles.chipTextSelected]}>Confirmación</Text></Pressable><Pressable onPress={() => setTrackingType('minutes')} style={[styles.chip, trackingType === 'minutes' && styles.chipSelected]}><Text style={[styles.chipText, trackingType === 'minutes' && styles.chipTextSelected]}>Minutos</Text></Pressable></View></View>
           <View style={styles.fieldGroup}><Text style={styles.label}>Duración</Text><DurationPickerField value={duration} onChange={setDuration} disabled={saving} /></View>
           <View style={styles.fieldGroup}><Text style={styles.label}>Hora de inicio</Text><TimePickerField value={startTime} onChange={setStartTime} disabled={saving} /></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Fecha</Text><View style={styles.dateRow}><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(0, 4), 10)} onValueChange={(v) => { const nd = `${v}-${plannedDate.slice(5)}`; if (nd >= todayDate && nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{[parseInt(cycleStart.slice(0, 4), 10), parseInt(cycleEnd.slice(0, 4), 10)].filter((v2, i, a) => a.indexOf(v2) === i).map((y) => <Picker.Item key={y} label={String(y)} value={y} />)}</Picker></View></View><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(5, 7), 10)} onValueChange={(v) => { const nd = `${plannedDate.slice(0, 5)}${String(v).padStart(2, '0')}-${plannedDate.slice(8)}`; if (nd >= todayDate && nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <Picker.Item key={m} label={String(m).padStart(2, '0')} value={m} />)}</Picker></View></View><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(8, 10), 10)} onValueChange={(v) => { const nd = `${plannedDate.slice(0, 8)}${String(v).padStart(2, '0')}`; if (nd >= todayDate && nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{Array.from({ length: 31 }, (_, i) => i + 1).map((d) => <Picker.Item key={d} label={String(d).padStart(2, '0')} value={d} />)}</Picker></View></View></View></View>
           <Pressable onPress={handleSave} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && !saving && styles.saveBtnPressed, saving && styles.saveBtnDisabled]}>{saving ? <ActivityIndicator color={Palette.textOnPrimary} size="small" /> : <Text style={styles.saveBtnText}>Guardar</Text>}</Pressable>
         </ScrollView>
       </SafeAreaView>
@@ -675,11 +726,11 @@ function EditTaskModal({ userId, task, isDuplicate, todayDate, cycleId, onClose,
     setSaving(true); setError(null);
 
     if (isDuplicate) {
-      const maxPos = await getMaxPosition(userId, todayDate);
+      const maxPos = await getMaxPosition(userId, plannedDate);
       const { error: err } = await createTaskOccurrence({
         user_id: userId, cycle_id: cycleId, activity_id: task.activity_id, schedule_id: null,
         category_id: task.category_id, title: trimmed, details: details.trim() || null,
-        planned_date: todayDate, planned_minutes: duration, start_time: startTime,
+        planned_date: plannedDate, planned_minutes: duration, start_time: startTime,
         tracking_type: task.tracking_type, target_value: task.target_value,
         unit: task.unit, weight: task.weight,
         source: task.source === 'one_off' ? 'one_off' : 'manual',
@@ -697,7 +748,7 @@ function EditTaskModal({ userId, task, isDuplicate, todayDate, cycleId, onClose,
       if (err) { setError('No se pudo guardar.'); return; }
     }
     onSaved();
-  }, [title, details, duration, startTime, userId, task, isDuplicate, todayDate, cycleId, saving, onSaved]);
+  }, [title, details, duration, startTime, userId, task, isDuplicate, cycleId, saving, onSaved]);
 
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet">
@@ -732,6 +783,8 @@ const styles = StyleSheet.create({
   section: { gap: Spacing.sm },
   sectionTitle: { fontSize: 16, fontWeight: '600', color: Palette.textPrimary },
   taskList: { gap: Spacing.sm },
+  sortableContainer: { width: '100%', alignSelf: 'stretch' },
+  taskTitleWrap: { flex: 1, minWidth: 0 },
 
   errorText: { fontSize: 14, color: Palette.error, textAlign: 'center' },
   retryBtn: { height: 40, paddingHorizontal: Spacing.lg, backgroundColor: Palette.primary, borderRadius: Radius.sm, alignItems: 'center', justifyContent: 'center' },
@@ -745,16 +798,20 @@ const styles = StyleSheet.create({
   linkBtnText: { fontSize: 14, fontWeight: '600', color: Palette.primary },
 
   // Task row
-  taskRow: { flexDirection: 'row', backgroundColor: Palette.surface, borderRadius: Radius.md, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 },
-  stripe: { width: 4 },
-  taskContent: { flex: 1, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, gap: 4 },
+  taskRow: { flexDirection: 'row', backgroundColor: Palette.surface, borderRadius: Radius.md, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1, alignItems: 'center', width: '100%' },
+  dragHandle: { width: 32, height: '100%', alignItems: 'center', justifyContent: 'center', paddingLeft: 4 },
+  stripe: { width: 4, alignSelf: 'stretch' },
+  taskContent: { flex: 1, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, gap: 4, minWidth: 0 },
   taskTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
   taskTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: Palette.textPrimary },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.full },
+  pillDisabled: { opacity: 0.5 },
   dot: { width: 6, height: 6, borderRadius: 3 },
   pillText: { fontSize: 12, fontWeight: '600' },
+  moreBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginLeft: 4 },
   taskMeta: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexWrap: 'wrap' },
   metaText: { fontSize: 13, color: Palette.textSecondary },
+  detailsText: { fontSize: 13, color: Palette.textSecondary, lineHeight: 18 },
 
   // Order buttons
   orderRow: { flexDirection: 'row', gap: Spacing.xs, marginTop: 2 },
@@ -813,4 +870,11 @@ const styles = StyleSheet.create({
   routineItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Palette.surface, borderRadius: Radius.md, padding: Spacing.md, borderWidth: 1, borderColor: Palette.border },
   routineItemText: { fontSize: 15, fontWeight: '600', color: Palette.textPrimary },
   routineItemMeta: { fontSize: 13, color: Palette.textSecondary },
+
+  // Move modal
+  moveWarning: { fontSize: 13, color: Palette.textSecondary, lineHeight: 18, textAlign: 'center', paddingVertical: Spacing.sm },
+  dateRow: { flexDirection: 'row', gap: Spacing.sm },
+  dateCol: { flex: 1 },
+  pickerContainer: { borderWidth: 1, borderColor: Palette.border, borderRadius: Radius.sm, backgroundColor: Palette.surface, overflow: 'hidden' },
+  pickerInner: { height: 48 },
 });

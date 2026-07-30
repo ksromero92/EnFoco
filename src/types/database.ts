@@ -264,6 +264,54 @@ export type Database = {
         }
         Relationships: []
       }
+      task_occurrence_exceptions: {
+        Row: {
+          created_at: string
+          exception_type: string
+          id: string
+          original_date: string
+          schedule_id: string
+          target_date: string | null
+          task_occurrence_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          exception_type: string
+          id?: string
+          original_date: string
+          schedule_id: string
+          target_date?: string | null
+          task_occurrence_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          exception_type?: string
+          id?: string
+          original_date?: string
+          schedule_id?: string
+          target_date?: string | null
+          task_occurrence_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "toe_schedule_fk"
+            columns: ["schedule_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "activity_schedules"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "toe_task_fk"
+            columns: ["task_occurrence_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "task_occurrences"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
       task_occurrences: {
         Row: {
           activity_id: string | null
@@ -399,9 +447,47 @@ export type Database = {
         Args: { p_source_cycle_id: string; p_target_cycle_id: string }
         Returns: number
       }
+      delete_task_occurrence_for_day: {
+        Args: { p_task_id: string }
+        Returns: boolean
+      }
       ensure_task_occurrences: {
         Args: { p_date_from: string; p_date_to: string }
         Returns: number
+      }
+      move_task_occurrence: {
+        Args: { p_target_date: string; p_task_id: string }
+        Returns: {
+          activity_id: string | null
+          category_id: string
+          completed_minutes: number | null
+          completed_value: number | null
+          created_at: string
+          cycle_id: string
+          details: string | null
+          id: string
+          note: string | null
+          planned_date: string
+          planned_minutes: number
+          position: number
+          schedule_id: string | null
+          source: string
+          start_time: string | null
+          status: string
+          target_value: number | null
+          title: string
+          tracking_type: string
+          unit: string | null
+          updated_at: string
+          user_id: string
+          weight: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "task_occurrences"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       reorder_task_occurrences: {
         Args: { p_planned_date: string; p_task_ids: string[] }
