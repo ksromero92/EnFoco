@@ -4,7 +4,7 @@
  */
 
 import { supabase } from '@/src/lib/supabase/client';
-import type { Tables } from '@/src/types/database';
+import type { Tables, TablesInsert, TablesUpdate } from '@/src/types/database';
 
 export type TaskOccurrence = Tables<'task_occurrences'>;
 
@@ -46,7 +46,25 @@ export async function getTasksForDate(userId: string, plannedDate: string) {
 }
 
 /**
- * Get the active cycle for the user (used for cycle day indicator).
+ * Get all task_occurrences for a date range, ordered by date then position.
+ */
+export async function getTasksForRange(userId: string, dateFrom: string, dateTo: string) {
+  const { data, error } = await supabase
+    .from('task_occurrences')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('planned_date', dateFrom)
+    .lte('planned_date', dateTo)
+    .order('planned_date', { ascending: true })
+    .order('position', { ascending: true })
+    .order('start_time', { ascending: true, nullsFirst: false })
+    .order('title', { ascending: true });
+
+  return { data: data ?? [], error };
+}
+
+/**
+ * Get the active cycle for the user.
  */
 export async function getActiveCycle(userId: string) {
   const { data, error } = await supabase
@@ -59,7 +77,7 @@ export async function getActiveCycle(userId: string) {
 }
 
 /**
- * Get categories by IDs (for display).
+ * Get categories by IDs.
  */
 export async function getCategoriesByIds(userId: string, categoryIds: string[]) {
   if (categoryIds.length === 0) return { data: [], error: null };
@@ -72,8 +90,50 @@ export async function getCategoriesByIds(userId: string, categoryIds: string[]) 
   return { data: data ?? [], error };
 }
 
+/**
+ * Get all active categories for a user.
+ */
+export async function getActiveCategories(userId: string) {
+  const { data, error } = await supabase
+    .from('categories')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .order('position', { ascending: true });
+  return { data: data ?? [], error };
+}
+
+/**
+ * Get active activities for the active cycle (for "from routine" creation).
+ */
+export async function getActiveActivitiesForCycle(userId: string, cycleId: string) {
+  const { data, error } = await supabase
+    .from('activities')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('cycle_id', cycleId)
+    .eq('is_active', true)
+    .order('name', { ascending: true });
+  return { data: data ?? [], error };
+}
+
+/**
+ * Get the max position for a user + date (for new tasks at end).
+ */
+export async function getMaxPosition(userId: string, plannedDate: string): Promise<number> {
+  const { data } = await supabase
+    .from('task_occurrences')
+    .select('position')
+    .eq('user_id', userId)
+    .eq('planned_date', plannedDate)
+    .order('position', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.position ?? 0;
+}
+
 // ---------------------------------------------------------------------------
-// Mutations
+// Mutations — Completion
 // ---------------------------------------------------------------------------
 
 export interface CompletionInput {
@@ -105,27 +165,58 @@ export async function updateTaskCompletion(
   return { data, error };
 }
 
+// ---------------------------------------------------------------------------
+// Mutations — CRUD
+// ---------------------------------------------------------------------------
+
 /**
- * Get all task_occurrences for a date range, ordered by date then position.
+ * Create a new task_occurrence.
  */
-export async function getTasksForRange(userId: string, dateFrom: string, dateTo: string) {
+export async function createTaskOccurrence(input: TablesInsert<'task_occurrences'>) {
   const { data, error } = await supabase
     .from('task_occurrences')
-    .select('*')
-    .eq('user_id', userId)
-    .gte('planned_date', dateFrom)
-    .lte('planned_date', dateTo)
-    .order('planned_date', { ascending: true })
-    .order('position', { ascending: true })
-    .order('start_time', { ascending: true, nullsFirst: false })
-    .order('title', { ascending: true });
-
-  return { data: data ?? [], error };
+    .insert(input)
+    .select()
+    .single();
+  return { data, error };
 }
 
 /**
- * Reorder all tasks for a date using the RPC that assigns positions atomically.
- * The order of IDs in the array determines the final position (1000, 2000, ...).
+ * Update an existing task_occurrence (for editing title, details, time, duration).
+ */
+export async function updateTaskOccurrence(
+  userId: string,
+  taskId: string,
+  input: TablesUpdate<'task_occurrences'>,
+) {
+  const { data, error } = await supabase
+    .from('task_occurrences')
+    .update(input)
+    .eq('id', taskId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+  return { data, error };
+}
+
+/**
+ * Delete a task_occurrence.
+ */
+export async function deleteTaskOccurrence(userId: string, taskId: string) {
+  const { error } = await supabase
+    .from('task_occurrences')
+    .delete()
+    .eq('id', taskId)
+    .eq('user_id', userId);
+  return { error };
+}
+
+// ---------------------------------------------------------------------------
+// Reorder
+// ---------------------------------------------------------------------------
+
+/**
+ * Reorder all tasks for a date using the RPC.
  */
 export async function reorderTasksForDate(plannedDate: string, orderedTaskIds: string[]) {
   const { data, error } = await supabase.rpc('reorder_task_occurrences', {
@@ -133,40 +224,4 @@ export async function reorderTasksForDate(plannedDate: string, orderedTaskIds: s
     p_task_ids: orderedTaskIds,
   });
   return { updated: (data as number | null) ?? 0, error };
-}
-
-// ---------------------------------------------------------------------------
-// Temporary compatibility: sync to activity_logs
-// ---------------------------------------------------------------------------
-// TODO: Remove once Semana and Progreso are migrated to task_occurrences.
-// This upserts an activity_log mirroring the task completion so that the
-// legacy screens (week, progress) continue to reflect accurate data.
-
-/**
- * Sync a recurring task's completion to activity_logs for backward compat.
- * Only syncs if task has source='recurring' and activity_id is not null.
- * Failures here do NOT revert the task_occurrence update.
- */
-export async function syncToActivityLog(task: TaskOccurrence) {
-  // Only sync recurring tasks with a linked activity
-  if (task.source !== 'recurring' || !task.activity_id) return { error: null };
-
-  const { error } = await supabase
-    .from('activity_logs')
-    .upsert(
-      {
-        user_id: task.user_id,
-        activity_id: task.activity_id,
-        log_date: task.planned_date,
-        status: task.status === 'completed' ? 'completed'
-          : task.status === 'partial' ? 'partial'
-          : 'pending',
-        completed_value: task.completed_value,
-        completed_minutes: task.completed_minutes,
-        note: task.note,
-      },
-      { onConflict: 'activity_id,log_date' },
-    );
-
-  return { error };
 }
