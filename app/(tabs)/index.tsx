@@ -92,6 +92,12 @@ export default function TodayScreen() {
   const [deleteTask, setDeleteTask] = useState<TaskOccurrence | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [moveTask, setMoveTask] = useState<TaskOccurrence | null>(null);
+  const [missedTask, setMissedTask] = useState<TaskOccurrence | null>(null);
+  const [justifyTask, setJustifyTask] = useState<TaskOccurrence | null>(null);
+  const [justifyNote, setJustifyNote] = useState('');
+  const [justifySaving, setJustifySaving] = useState(false);
+  const [justifyError, setJustifyError] = useState<string | null>(null);
+  const [viewJustification, setViewJustification] = useState<TaskOccurrence | null>(null);
 
   const hasMounted = useRef(false);
 
@@ -174,6 +180,9 @@ export default function TodayScreen() {
     const task = tasks.find((t) => t.id === taskId);
     if (!task || !user || savingId) return;
 
+    // Block completion for missed/justified — user must restore first
+    if (task.status === 'missed' || task.status === 'justified') return;
+
     if (task.tracking_type === 'minutes') {
       setMinutesTask(task);
       setMinutesInput(task.completed_minutes && task.completed_minutes > 0 ? String(task.completed_minutes) : '');
@@ -255,6 +264,36 @@ export default function TodayScreen() {
     setMoveTask(null);
     await loadData({ silent: true });
   }, [moveTask, loadData]);
+
+  const handleMarkMissed = useCallback(async () => {
+    if (!user || !missedTask || savingId) return;
+    setSavingId(missedTask.id);
+    const { error: err } = await updateTaskCompletion(user.id, missedTask.id, { status: 'missed', completed_value: 0, completed_minutes: 0 });
+    setSavingId(null);
+    setMissedTask(null);
+    if (!err) await loadData({ silent: true });
+  }, [user, missedTask, savingId, loadData]);
+
+  const handleJustify = useCallback(async () => {
+    if (!user || !justifyTask || justifySaving) return;
+    const trimmed = justifyNote.trim();
+    if (trimmed.length < 3) { setJustifyError('La justificación debe tener al menos 3 caracteres.'); return; }
+    if (trimmed.length > 300) { setJustifyError('Máximo 300 caracteres.'); return; }
+    setJustifySaving(true); setJustifyError(null);
+    const { error: err } = await updateTaskOccurrence(user.id, justifyTask.id, { status: 'justified', completed_value: 0, completed_minutes: 0, note: trimmed });
+    setJustifySaving(false);
+    if (err) { setJustifyError('No se pudo guardar.'); return; }
+    setJustifyTask(null); setJustifyNote('');
+    await loadData({ silent: true });
+  }, [user, justifyTask, justifyNote, justifySaving, loadData]);
+
+  const handleRestore = useCallback(async (task: TaskOccurrence) => {
+    if (!user || savingId) return;
+    setSavingId(task.id);
+    const { error: err } = await updateTaskOccurrence(user.id, task.id, { status: 'pending', completed_value: 0, completed_minutes: 0, note: null });
+    setSavingId(null);
+    if (!err) await loadData({ silent: true });
+  }, [user, savingId, loadData]);
 
   const handleCreateSaved = useCallback(async () => {
     setCreateMode(null);
@@ -342,9 +381,9 @@ export default function TodayScreen() {
                 rowGap={Spacing.sm}
                 renderItem={({ item: task }) => {
                   const cat = catMap.get(task.category_id);
-                  const statusLabel = task.status === 'completed' ? 'Completa' : task.status === 'partial' ? 'Parcial' : 'Pendiente';
-                  const statusColor = task.status === 'completed' ? Palette.complete : task.status === 'partial' ? Palette.partial : Palette.pending;
-                  const statusBg = task.status === 'completed' ? Palette.completeLight : task.status === 'partial' ? Palette.partialLight : Palette.pendingLight;
+                  const statusLabel = task.status === 'completed' ? 'Completa' : task.status === 'partial' ? 'Parcial' : task.status === 'missed' ? 'No realizada' : task.status === 'justified' ? 'Justificada' : 'Pendiente';
+                  const statusColor = task.status === 'completed' ? Palette.complete : task.status === 'partial' ? Palette.partial : task.status === 'missed' ? Palette.error : task.status === 'justified' ? Palette.textSecondary : Palette.pending;
+                  const statusBg = task.status === 'completed' ? Palette.completeLight : task.status === 'partial' ? Palette.partialLight : task.status === 'missed' ? Palette.errorLight : task.status === 'justified' ? Palette.pendingLight : Palette.pendingLight;
 
                   return (
                     <View style={styles.taskRow}>
@@ -403,8 +442,20 @@ export default function TodayScreen() {
               <Text style={styles.actionTitle}>{actionTask.title}</Text>
               <Pressable onPress={() => { setEditingTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Editar</Text></Pressable>
               <Pressable onPress={() => { setDuplicatingTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Duplicar</Text></Pressable>
-              {actionTask.status === 'pending' && (
-                <Pressable onPress={() => { setMoveTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Mover a otro día</Text></Pressable>
+              {(actionTask.status === 'pending' || actionTask.status === 'partial') && (
+                <Pressable onPress={() => { if (actionTask.status !== 'pending') { return; } setMoveTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Mover a otro día</Text></Pressable>
+              )}
+              {(actionTask.status === 'pending' || actionTask.status === 'partial') && (
+                <Pressable onPress={() => { setMissedTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Marcar como no realizada</Text></Pressable>
+              )}
+              {(actionTask.status === 'pending' || actionTask.status === 'partial' || actionTask.status === 'missed') && (
+                <Pressable onPress={() => { setJustifyTask(actionTask); setJustifyNote(''); setJustifyError(null); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Justificar</Text></Pressable>
+              )}
+              {actionTask.status === 'justified' && (
+                <Pressable onPress={() => { setViewJustification(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Ver justificación</Text></Pressable>
+              )}
+              {(actionTask.status === 'missed' || actionTask.status === 'justified') && (
+                <Pressable onPress={() => { handleRestore(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Restablecer a pendiente</Text></Pressable>
               )}
               <Pressable onPress={() => { setDeleteTask(actionTask); setActionTask(null); }} style={[styles.actionBtn, styles.actionBtnDanger]}><Text style={styles.actionBtnDangerText}>Eliminar del día</Text></Pressable>
               <Pressable onPress={() => setActionTask(null)} style={styles.actionBtn}><Text style={[styles.actionBtnText, { color: Palette.textSecondary }]}>Cancelar</Text></Pressable>
@@ -428,6 +479,50 @@ export default function TodayScreen() {
                 <Pressable onPress={() => setDeleteTask(null)} disabled={deleting} style={styles.modalCancel}><Text style={styles.modalCancelText}>Cancelar</Text></Pressable>
                 <Pressable onPress={handleDelete} disabled={deleting} style={[styles.modalSave, { backgroundColor: Palette.error }]}><Text style={styles.modalSaveText}>{deleting ? '...' : 'Eliminar'}</Text></Pressable>
               </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Missed confirmation */}
+      {missedTask && (
+        <Modal visible animationType="fade" transparent>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>No realizada</Text>
+              <Text style={styles.modalSub}>Esta tarea quedará registrada como no realizada.</Text>
+              <View style={styles.modalActions}>
+                <Pressable onPress={() => setMissedTask(null)} style={styles.modalCancel}><Text style={styles.modalCancelText}>Cancelar</Text></Pressable>
+                <Pressable onPress={handleMarkMissed} style={styles.modalSave}><Text style={styles.modalSaveText}>Confirmar</Text></Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Justify modal */}
+      {justifyTask && (
+        <Modal visible animationType="slide" presentationStyle="pageSheet">
+          <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+            <ScrollView contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
+              <View style={styles.formHeader}><Text style={styles.formTitle}>Justificar tarea</Text><Pressable onPress={() => { setJustifyTask(null); setJustifyNote(''); }}><Text style={styles.formCancel}>Cancelar</Text></Pressable></View>
+              <Text style={styles.moveWarning}>Indica por qué esta tarea no se realizó.</Text>
+              {justifyError && <View style={styles.errorBox}><Text style={styles.errorBoxText}>{justifyError}</Text></View>}
+              <TextInput style={[styles.input, { height: 100, textAlignVertical: 'top', paddingTop: Spacing.sm }]} value={justifyNote} onChangeText={setJustifyNote} placeholder="Razón de la justificación..." placeholderTextColor={Palette.textSecondary} multiline editable={!justifySaving} maxLength={300} />
+              <Pressable onPress={handleJustify} disabled={justifySaving} style={({ pressed }) => [styles.saveBtn, pressed && !justifySaving && styles.saveBtnPressed, justifySaving && styles.saveBtnDisabled]}><Text style={styles.saveBtnText}>{justifySaving ? 'Guardando...' : 'Guardar justificación'}</Text></Pressable>
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
+      )}
+
+      {/* View justification */}
+      {viewJustification && (
+        <Modal visible animationType="fade" transparent>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Justificación</Text>
+              <Text style={styles.modalSub}>{viewJustification.note ?? 'Sin nota.'}</Text>
+              <Pressable onPress={() => setViewJustification(null)} style={styles.modalSave}><Text style={styles.modalSaveText}>Cerrar</Text></Pressable>
             </View>
           </View>
         </Modal>
