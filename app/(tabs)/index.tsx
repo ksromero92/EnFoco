@@ -812,6 +812,7 @@ function EditTaskModal({ userId, task, isDuplicate, todayDate, cycleId, onClose,
   const [startTime, setStartTime] = useState<string | null>(task.start_time?.slice(0, 5) ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [plannedDate, setPlannedDate] = useState(todayDate);
 
   const handleSave = useCallback(async () => {
     if (saving) return;

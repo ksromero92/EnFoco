@@ -4,44 +4,57 @@
  */
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { Picker } from '@react-native-picker/picker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    FlatList,
-    Modal,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Palette, Radius, Spacing } from '@/constants/theme';
+import { CategoryIcon } from '@/src/components/categories/CategoryIcon';
+import { DurationPickerField } from '@/src/components/forms/DurationPickerField';
+import { TimePickerField } from '@/src/components/forms/TimePickerField';
 import { useAuth } from '@/src/features/auth/AuthProvider';
 import { useProfile } from '@/src/features/profile/ProfileProvider';
 import type { TaskOccurrence } from '@/src/features/tasks/task-occurrences-service';
 import {
-    ensureTaskOccurrences,
-    getActiveCycle,
-    getCategoriesByIds,
-    getTasksForRange,
+  createTaskOccurrence,
+  deleteTaskOccurrenceForDay,
+  ensureTaskOccurrences,
+  getActiveActivitiesForCycle,
+  getActiveCategories,
+  getActiveCycle,
+  getCategoriesByIds,
+  getMaxPosition,
+  getTasksForRange,
+  moveTaskOccurrence,
+  updateTaskOccurrence
 } from '@/src/features/tasks/task-occurrences-service';
 import { getTodayDate } from '@/src/features/today/today-utils';
 import type { CycleWeek } from '@/src/features/week/week-utils';
 import {
-    formatDayFull,
-    formatWeekRange,
-    getCycleWeekRanges,
-    getWeekDaysForMonday,
-    isDateInsideCycle
+  formatDayFull,
+  formatWeekRange,
+  getCycleWeekRanges,
+  getWeekDaysForMonday,
+  isDateInsideCycle
 } from '@/src/features/week/week-utils';
 import type { Tables } from '@/src/types/database';
 
 type Category = Tables<'categories'>;
 type Cycle = Tables<'cycles'>;
+type Activity = Tables<'activities'>;
 
 // ---------------------------------------------------------------------------
 // Status config
@@ -95,6 +108,15 @@ export default function WeekScreen() {
   const [selectedWeekIndex, setSelectedWeekIndex] = useState(0);
   const [selectedDate, setSelectedDate] = useState(todayDate);
   const [weekSelectorVisible, setWeekSelectorVisible] = useState(false);
+
+  // CRUD state
+  const [actionTask, setActionTask] = useState<TaskOccurrence | null>(null);
+  const [createMode, setCreateMode] = useState<'choose' | 'routine' | 'oneoff' | null>(null);
+  const [editingTask, setEditingTask] = useState<TaskOccurrence | null>(null);
+  const [duplicatingTask, setDuplicatingTask] = useState<TaskOccurrence | null>(null);
+  const [moveTask, setMoveTask] = useState<TaskOccurrence | null>(null);
+  const [deleteTask, setDeleteTask] = useState<TaskOccurrence | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const hasMounted = useRef(false);
   const loadingRef = useRef(false);
@@ -224,6 +246,40 @@ export default function WeekScreen() {
   const goPrev = useCallback(() => { if (selectedWeekIndex > 0) goToWeek(selectedWeekIndex - 1); }, [selectedWeekIndex, goToWeek]);
   const goNext = useCallback(() => { if (selectedWeekIndex < weeks.length - 1) goToWeek(selectedWeekIndex + 1); }, [selectedWeekIndex, weeks.length, goToWeek]);
 
+  // ─── CRUD handlers ─────────────────────────────────────────────────────
+
+  const reloadWeek = useCallback(async () => {
+    if (currentWeek) await loadWeekData(currentWeek, { silent: true });
+  }, [currentWeek, loadWeekData]);
+
+  const handleMove = useCallback(async (targetDate: string) => {
+    if (!moveTask) return;
+    const { error: err } = await moveTaskOccurrence(moveTask.id, targetDate);
+    if (err) return;
+    setMoveTask(null);
+    await reloadWeek();
+  }, [moveTask, reloadWeek]);
+
+  const handleDelete = useCallback(async () => {
+    if (!deleteTask || deleting) return;
+    setDeleting(true);
+    await deleteTaskOccurrenceForDay(deleteTask.id);
+    setDeleting(false);
+    setDeleteTask(null);
+    await reloadWeek();
+  }, [deleteTask, deleting, reloadWeek]);
+
+  const handleCreateSaved = useCallback(async () => {
+    setCreateMode(null);
+    await reloadWeek();
+  }, [reloadWeek]);
+
+  const handleEditSaved = useCallback(async () => {
+    setEditingTask(null);
+    setDuplicatingTask(null);
+    await reloadWeek();
+  }, [reloadWeek]);
+
   // ─── Render ─────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -304,14 +360,20 @@ export default function WeekScreen() {
 
         {/* Selected day header */}
         <View style={styles.dayHeader}>
-          <Text style={styles.dayHeaderTitle}>{formatDayFull(selectedDate)}</Text>
-          {selectedTasks.length > 0 && (
-            <View style={styles.dayProgress}>
-              <Text style={styles.dayPct}>{pct}%</Text>
-              <Text style={styles.dayTime}>{formatMinutes(completedMin)} / {formatMinutes(scheduledMin)}</Text>
-            </View>
-          )}
+          <View>
+            <Text style={styles.dayHeaderTitle}>{formatDayFull(selectedDate)}</Text>
+            {selectedTasks.length > 0 && <Text style={styles.dayTaskCount}>{selectedTasks.length} tarea{selectedTasks.length > 1 ? 's' : ''}</Text>}
+          </View>
+          <Pressable onPress={() => setCreateMode('choose')} style={styles.addBtn} accessibilityRole="button" accessibilityLabel="Agregar tarea">
+            <Text style={styles.addBtnText}>+ Agregar</Text>
+          </Pressable>
         </View>
+        {selectedTasks.length > 0 && (
+          <View style={styles.dayProgressBar}>
+            <Text style={styles.dayPct}>{pct}%</Text>
+            <Text style={styles.dayTime}>{formatMinutes(completedMin)} / {formatMinutes(scheduledMin)}</Text>
+          </View>
+        )}
 
         {/* Tasks */}
         {selectedTasks.length > 0 ? (
@@ -329,6 +391,9 @@ export default function WeekScreen() {
                         <View style={[styles.dot, { backgroundColor: st.color }]} />
                         <Text style={[styles.pillText, { color: st.color }]}>{st.label}</Text>
                       </View>
+                      <Pressable onPress={() => setActionTask(task)} style={styles.moreBtn} accessibilityLabel="Abrir acciones de la tarea" accessibilityRole="button">
+                        <MaterialIcons name="more-horiz" size={20} color={Palette.textSecondary} />
+                      </Pressable>
                     </View>
                     {task.details ? <Text style={styles.detailsText} numberOfLines={2}>{task.details}</Text> : null}
                     <View style={styles.taskMeta}>
@@ -374,6 +439,60 @@ export default function WeekScreen() {
           </View>
         </Modal>
       )}
+
+      {/* Action menu */}
+      {actionTask && (
+        <Modal visible animationType="fade" transparent>
+          <Pressable style={styles.sheetOverlay} onPress={() => setActionTask(null)}>
+            <View style={styles.actionCard}>
+              <Text style={styles.actionTitle}>{actionTask.title}</Text>
+              <Pressable onPress={() => { setEditingTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Editar</Text></Pressable>
+              <Pressable onPress={() => { setDuplicatingTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Duplicar</Text></Pressable>
+              <Pressable onPress={() => { if (actionTask.status !== 'pending') return; setMoveTask(actionTask); setActionTask(null); }} style={styles.actionBtn}><Text style={styles.actionBtnText}>Mover a otro día</Text></Pressable>
+              <Pressable onPress={() => { setDeleteTask(actionTask); setActionTask(null); }} style={[styles.actionBtn, styles.actionBtnDanger]}><Text style={styles.actionBtnDangerText}>Eliminar del día</Text></Pressable>
+              <Pressable onPress={() => setActionTask(null)} style={styles.actionBtn}><Text style={[styles.actionBtnText, { color: Palette.textSecondary }]}>Cancelar</Text></Pressable>
+            </View>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Delete confirmation */}
+      {deleteTask && (
+        <Modal visible animationType="fade" transparent>
+          <View style={styles.sheetOverlay}>
+            <View style={styles.actionCard}>
+              <Text style={styles.actionTitle}>Eliminar del día</Text>
+              <Text style={styles.deleteMsg}>{deleteTask.schedule_id ? 'Esta tarea se eliminará únicamente de este día.' : 'Esta tarea se eliminará de tu agenda.'}</Text>
+              <View style={styles.deleteActions}>
+                <Pressable onPress={() => setDeleteTask(null)} style={styles.actionBtn}><Text style={styles.actionBtnText}>Cancelar</Text></Pressable>
+                <Pressable onPress={handleDelete} disabled={deleting} style={[styles.actionBtn, styles.actionBtnDanger]}><Text style={styles.actionBtnDangerText}>{deleting ? '...' : 'Eliminar'}</Text></Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Move */}
+      {moveTask && <WeekMoveModal task={moveTask} cycle={cycle} onClose={() => setMoveTask(null)} onMove={handleMove} />}
+
+      {/* Create */}
+      {createMode === 'choose' && (
+        <Modal visible animationType="fade" transparent>
+          <View style={styles.sheetOverlay}>
+            <View style={styles.actionCard}>
+              <Text style={styles.actionTitle}>Agregar tarea</Text>
+              <Pressable onPress={() => setCreateMode('routine')} style={styles.actionBtn}><Text style={styles.actionBtnText}>Desde una rutina</Text></Pressable>
+              <Pressable onPress={() => setCreateMode('oneoff')} style={styles.actionBtn}><Text style={styles.actionBtnText}>Tarea puntual</Text></Pressable>
+              <Pressable onPress={() => setCreateMode(null)} style={styles.actionBtn}><Text style={[styles.actionBtnText, { color: Palette.textSecondary }]}>Cancelar</Text></Pressable>
+            </View>
+          </View>
+        </Modal>
+      )}
+      {createMode === 'routine' && <WeekCreateRoutineModal userId={user?.id ?? ''} cycleId={cycle?.id ?? ''} cycleStart={cycle?.start_date ?? ''} cycleEnd={cycle?.end_date ?? ''} initialDate={selectedDate} onClose={() => setCreateMode(null)} onSaved={handleCreateSaved} />}
+      {createMode === 'oneoff' && <WeekCreateOneOffModal userId={user?.id ?? ''} cycleId={cycle?.id ?? ''} cycleStart={cycle?.start_date ?? ''} cycleEnd={cycle?.end_date ?? ''} initialDate={selectedDate} onClose={() => setCreateMode(null)} onSaved={handleCreateSaved} />}
+
+      {/* Edit / Duplicate */}
+      {(editingTask || duplicatingTask) && <WeekEditModal userId={user?.id ?? ''} task={(editingTask ?? duplicatingTask)!} isDuplicate={duplicatingTask !== null} cycleId={cycle?.id ?? ''} onClose={() => { setEditingTask(null); setDuplicatingTask(null); }} onSaved={handleEditSaved} />}
     </SafeAreaView>
   );
 }
@@ -381,6 +500,182 @@ export default function WeekScreen() {
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Sub-modals (lightweight, reusing services from task-occurrences-service)
+// ---------------------------------------------------------------------------
+
+function WeekMoveModal({ task, cycle, onClose, onMove }: { task: TaskOccurrence; cycle: Cycle | null; onClose: () => void; onMove: (d: string) => void }) {
+  const [y, setY] = useState(() => parseInt(task.planned_date.slice(0, 4), 10));
+  const [m, setM] = useState(() => parseInt(task.planned_date.slice(5, 7), 10));
+  const [d, setD] = useState(() => parseInt(task.planned_date.slice(8, 10), 10));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const maxD = new Date(y, m, 0).getDate();
+  const ed = Math.min(d, maxD);
+  const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(ed).padStart(2, '0')}`;
+
+  const handleConfirm = useCallback(() => {
+    if (saving) return;
+    if (task.status !== 'pending') { setError('Solo puedes mover tareas pendientes.'); return; }
+    if (dateStr === task.planned_date) { setError('Selecciona una fecha diferente.'); return; }
+    if (cycle && (dateStr < cycle.start_date || dateStr > cycle.end_date)) { setError('La fecha debe estar dentro del ciclo.'); return; }
+    setSaving(true); onMove(dateStr);
+  }, [saving, dateStr, task, cycle, onMove]);
+
+  const years = cycle ? [...new Set([parseInt(cycle.start_date.slice(0, 4), 10), parseInt(cycle.end_date.slice(0, 4), 10)])] : [y];
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.formHeader}><Text style={styles.formTitle}>Mover a otro día</Text><Pressable onPress={onClose}><Text style={styles.formCancel}>Cancelar</Text></Pressable></View>
+          <Text style={styles.moveWarning}>Esta tarea se moverá únicamente para esta ocasión. La rutina original no cambiará.</Text>
+          {error && <View style={styles.errorBox}><Text style={styles.errorBoxText}>{error}</Text></View>}
+          <View style={styles.dateRow}><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={y} onValueChange={(v) => setY(Number(v))} style={styles.pickerInner}>{years.map((yr) => <Picker.Item key={yr} label={String(yr)} value={yr} />)}</Picker></View></View><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={m} onValueChange={(v) => setM(Number(v))} style={styles.pickerInner}>{Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => <Picker.Item key={mo} label={String(mo).padStart(2, '0')} value={mo} />)}</Picker></View></View><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={ed} onValueChange={(v) => setD(Number(v))} style={styles.pickerInner}>{Array.from({ length: maxD }, (_, i) => i + 1).map((da) => <Picker.Item key={da} label={String(da).padStart(2, '0')} value={da} />)}</Picker></View></View></View>
+          <Pressable onPress={handleConfirm} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && styles.saveBtnPressed, saving && styles.saveBtnDisabled]}><Text style={styles.saveBtnText}>{saving ? 'Moviendo...' : 'Mover tarea'}</Text></Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+function WeekCreateRoutineModal({ userId, cycleId, cycleStart, cycleEnd, initialDate, onClose, onSaved }: { userId: string; cycleId: string; cycleStart: string; cycleEnd: string; initialDate: string; onClose: () => void; onSaved: () => void }) {
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [selectedAct, setSelectedAct] = useState<Activity | null>(null);
+  const [title, setTitle] = useState('');
+  const [details, setDetails] = useState('');
+  const [duration, setDuration] = useState(30);
+  const [startTime, setStartTime] = useState<string | null>(null);
+  const [plannedDate, setPlannedDate] = useState(initialDate);
+  const [loadingActs, setLoadingActs] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { (async () => { const { data } = await getActiveActivitiesForCycle(userId, cycleId); setActivities(data); setLoadingActs(false); })(); }, [userId, cycleId]);
+
+  const handleSave = useCallback(async () => {
+    if (!selectedAct || saving) return;
+    const trimmed = title.trim();
+    if (!trimmed) { setError('El título es obligatorio.'); return; }
+    setSaving(true); setError(null);
+    const maxPos = await getMaxPosition(userId, plannedDate);
+    const { error: err } = await createTaskOccurrence({ user_id: userId, cycle_id: cycleId, activity_id: selectedAct.id, schedule_id: null, category_id: selectedAct.category_id, title: trimmed, details: details.trim() || null, planned_date: plannedDate, planned_minutes: duration, start_time: startTime, tracking_type: selectedAct.tracking_type, target_value: selectedAct.target_value, unit: selectedAct.unit, weight: selectedAct.weight, source: 'manual', status: 'pending', completed_value: null, completed_minutes: null, note: null, position: maxPos + 1000 });
+    setSaving(false);
+    if (err) { setError('No se pudo crear.'); return; }
+    onSaved();
+  }, [selectedAct, title, details, duration, startTime, plannedDate, userId, cycleId, saving, onSaved]);
+
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.formHeader}><Text style={styles.formTitle}>Desde una rutina</Text><Pressable onPress={onClose}><Text style={styles.formCancel}>Cancelar</Text></Pressable></View>
+          {error && <View style={styles.errorBox}><Text style={styles.errorBoxText}>{error}</Text></View>}
+          {loadingActs && <ActivityIndicator size="small" color={Palette.primary} />}
+          {!loadingActs && !selectedAct && activities.map((a) => (<Pressable key={a.id} onPress={() => { setSelectedAct(a); setTitle(a.name); setDetails(a.description ?? ''); setDuration(a.default_duration_minutes ?? 30); }} style={styles.routineItem}><Text style={styles.routineItemText}>{a.name}</Text></Pressable>))}
+          {selectedAct && (<>
+            <View style={styles.fieldGroup}><Text style={styles.label}>Título</Text><TextInput style={styles.input} value={title} onChangeText={setTitle} editable={!saving} /></View>
+            <View style={styles.fieldGroup}><Text style={styles.label}>Detalle</Text><TextInput style={styles.input} value={details} onChangeText={setDetails} editable={!saving} /></View>
+            <View style={styles.fieldGroup}><Text style={styles.label}>Duración</Text><DurationPickerField value={duration} onChange={setDuration} disabled={saving} /></View>
+            <View style={styles.fieldGroup}><Text style={styles.label}>Hora</Text><TimePickerField value={startTime} onChange={setStartTime} disabled={saving} /></View>
+            <View style={styles.fieldGroup}><Text style={styles.label}>Fecha</Text><View style={styles.dateRow}><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(0, 4), 10)} onValueChange={(v) => { const nd = `${v}-${plannedDate.slice(5)}`; if (nd >= initialDate && nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{[...new Set([parseInt(cycleStart.slice(0, 4), 10), parseInt(cycleEnd.slice(0, 4), 10)])].map((yr) => <Picker.Item key={yr} label={String(yr)} value={yr} />)}</Picker></View></View><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(5, 7), 10)} onValueChange={(v) => { const nd = `${plannedDate.slice(0, 5)}${String(v).padStart(2, '0')}-${plannedDate.slice(8)}`; if (nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => <Picker.Item key={mo} label={String(mo).padStart(2, '0')} value={mo} />)}</Picker></View></View><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(8, 10), 10)} onValueChange={(v) => { const nd = `${plannedDate.slice(0, 8)}${String(v).padStart(2, '0')}`; if (nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{Array.from({ length: 31 }, (_, i) => i + 1).map((da) => <Picker.Item key={da} label={String(da).padStart(2, '0')} value={da} />)}</Picker></View></View></View></View>
+            <Pressable onPress={handleSave} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && !saving && styles.saveBtnPressed, saving && styles.saveBtnDisabled]}><Text style={styles.saveBtnText}>{saving ? '...' : 'Guardar'}</Text></Pressable>
+          </>)}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+function WeekCreateOneOffModal({ userId, cycleId, cycleStart, cycleEnd, initialDate, onClose, onSaved }: { userId: string; cycleId: string; cycleStart: string; cycleEnd: string; initialDate: string; onClose: () => void; onSaved: () => void }) {
+  const [cats, setCats] = useState<Category[]>([]);
+  const [title, setTitle] = useState('');
+  const [details, setDetails] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [trackingType, setTrackingType] = useState<'boolean' | 'minutes'>('boolean');
+  const [duration, setDuration] = useState(30);
+  const [startTime, setStartTime] = useState<string | null>(null);
+  const [plannedDate, setPlannedDate] = useState(initialDate);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { (async () => { const { data } = await getActiveCategories(userId); setCats(data); if (data.length > 0) setCategoryId(data[0]!.id); })(); }, [userId]);
+
+  const handleSave = useCallback(async () => {
+    if (saving) return;
+    const trimmed = title.trim();
+    if (!trimmed) { setError('El título es obligatorio.'); return; }
+    if (!categoryId) { setError('Selecciona una categoría.'); return; }
+    setSaving(true); setError(null);
+    const maxPos = await getMaxPosition(userId, plannedDate);
+    const { error: err } = await createTaskOccurrence({ user_id: userId, cycle_id: cycleId, activity_id: null, schedule_id: null, category_id: categoryId, title: trimmed, details: details.trim() || null, planned_date: plannedDate, planned_minutes: duration, start_time: startTime, tracking_type: trackingType, target_value: trackingType === 'minutes' ? duration : null, unit: trackingType === 'minutes' ? 'min' : null, weight: 1, source: 'one_off', status: 'pending', completed_value: null, completed_minutes: null, note: null, position: maxPos + 1000 });
+    setSaving(false);
+    if (err) { setError('No se pudo crear.'); return; }
+    onSaved();
+  }, [title, details, categoryId, trackingType, duration, startTime, plannedDate, userId, cycleId, saving, onSaved]);
+
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.formHeader}><Text style={styles.formTitle}>Tarea puntual</Text><Pressable onPress={onClose}><Text style={styles.formCancel}>Cancelar</Text></Pressable></View>
+          {error && <View style={styles.errorBox}><Text style={styles.errorBoxText}>{error}</Text></View>}
+          <View style={styles.fieldGroup}><Text style={styles.label}>Título</Text><TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="Nombre" placeholderTextColor={Palette.textSecondary} editable={!saving} /></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Detalle</Text><TextInput style={styles.input} value={details} onChangeText={setDetails} editable={!saving} /></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Categoría</Text><View style={styles.chipRow}>{cats.map((c) => (<Pressable key={c.id} onPress={() => setCategoryId(c.id)} style={[styles.chip, categoryId === c.id && styles.chipSelected]}><CategoryIcon icon={c.icon} color={c.color} size={20} /><Text style={[styles.chipText, categoryId === c.id && styles.chipTextSelected]}>{c.name}</Text></Pressable>))}</View></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Seguimiento</Text><View style={styles.chipRow}><Pressable onPress={() => setTrackingType('boolean')} style={[styles.chip, trackingType === 'boolean' && styles.chipSelected]}><Text style={[styles.chipText, trackingType === 'boolean' && styles.chipTextSelected]}>Confirmación</Text></Pressable><Pressable onPress={() => setTrackingType('minutes')} style={[styles.chip, trackingType === 'minutes' && styles.chipSelected]}><Text style={[styles.chipText, trackingType === 'minutes' && styles.chipTextSelected]}>Minutos</Text></Pressable></View></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Duración</Text><DurationPickerField value={duration} onChange={setDuration} disabled={saving} /></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Hora</Text><TimePickerField value={startTime} onChange={setStartTime} disabled={saving} /></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Fecha</Text><View style={styles.dateRow}><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(0, 4), 10)} onValueChange={(v) => { const nd = `${v}-${plannedDate.slice(5)}`; if (nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{[...new Set([parseInt(cycleStart.slice(0, 4), 10), parseInt(cycleEnd.slice(0, 4), 10)])].map((yr) => <Picker.Item key={yr} label={String(yr)} value={yr} />)}</Picker></View></View><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(5, 7), 10)} onValueChange={(v) => { const nd = `${plannedDate.slice(0, 5)}${String(v).padStart(2, '0')}-${plannedDate.slice(8)}`; if (nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => <Picker.Item key={mo} label={String(mo).padStart(2, '0')} value={mo} />)}</Picker></View></View><View style={styles.dateCol}><View style={styles.pickerContainer}><Picker selectedValue={parseInt(plannedDate.slice(8, 10), 10)} onValueChange={(v) => { const nd = `${plannedDate.slice(0, 8)}${String(v).padStart(2, '0')}`; if (nd <= cycleEnd) setPlannedDate(nd); }} style={styles.pickerInner}>{Array.from({ length: 31 }, (_, i) => i + 1).map((da) => <Picker.Item key={da} label={String(da).padStart(2, '0')} value={da} />)}</Picker></View></View></View></View>
+          <Pressable onPress={handleSave} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && !saving && styles.saveBtnPressed, saving && styles.saveBtnDisabled]}><Text style={styles.saveBtnText}>{saving ? '...' : 'Guardar'}</Text></Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+function WeekEditModal({ userId, task, isDuplicate, cycleId, onClose, onSaved }: { userId: string; task: TaskOccurrence; isDuplicate: boolean; cycleId: string; onClose: () => void; onSaved: () => void }) {
+  const [title, setTitle] = useState(task.title);
+  const [details, setDetails] = useState(task.details ?? '');
+  const [duration, setDuration] = useState(task.planned_minutes);
+  const [startTime, setStartTime] = useState<string | null>(task.start_time?.slice(0, 5) ?? null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = useCallback(async () => {
+    if (saving) return;
+    const trimmed = title.trim();
+    if (!trimmed) { setError('El título es obligatorio.'); return; }
+    setSaving(true); setError(null);
+    if (isDuplicate) {
+      const maxPos = await getMaxPosition(userId, task.planned_date);
+      const { error: err } = await createTaskOccurrence({ user_id: userId, cycle_id: cycleId, activity_id: task.activity_id, schedule_id: null, category_id: task.category_id, title: trimmed, details: details.trim() || null, planned_date: task.planned_date, planned_minutes: duration, start_time: startTime, tracking_type: task.tracking_type, target_value: task.target_value, unit: task.unit, weight: task.weight, source: task.source === 'one_off' ? 'one_off' : 'manual', status: 'pending', completed_value: null, completed_minutes: null, note: null, position: maxPos + 1000 });
+      setSaving(false);
+      if (err) { setError('No se pudo duplicar.'); return; }
+    } else {
+      const { error: err } = await updateTaskOccurrence(userId, task.id, { title: trimmed, details: details.trim() || null, planned_minutes: duration, start_time: startTime });
+      setSaving(false);
+      if (err) { setError('No se pudo guardar.'); return; }
+    }
+    onSaved();
+  }, [title, details, duration, startTime, userId, task, isDuplicate, cycleId, saving, onSaved]);
+
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={styles.formScroll} keyboardShouldPersistTaps="handled">
+          <View style={styles.formHeader}><Text style={styles.formTitle}>{isDuplicate ? 'Duplicar tarea' : 'Editar tarea'}</Text><Pressable onPress={onClose}><Text style={styles.formCancel}>Cancelar</Text></Pressable></View>
+          {error && <View style={styles.errorBox}><Text style={styles.errorBoxText}>{error}</Text></View>}
+          <View style={styles.fieldGroup}><Text style={styles.label}>Título</Text><TextInput style={styles.input} value={title} onChangeText={setTitle} editable={!saving} /></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Detalle</Text><TextInput style={styles.input} value={details} onChangeText={setDetails} editable={!saving} /></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Duración</Text><DurationPickerField value={duration} onChange={setDuration} disabled={saving} /></View>
+          <View style={styles.fieldGroup}><Text style={styles.label}>Hora</Text><TimePickerField value={startTime} onChange={setStartTime} disabled={saving} /></View>
+          <Pressable onPress={handleSave} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && !saving && styles.saveBtnPressed, saving && styles.saveBtnDisabled]}><Text style={styles.saveBtnText}>{saving ? '...' : isDuplicate ? 'Duplicar' : 'Guardar'}</Text></Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: Palette.background },
@@ -453,4 +748,44 @@ const styles = StyleSheet.create({
   weekOptionTitle: { fontSize: 14, fontWeight: '600', color: Palette.textPrimary },
   weekOptionTitleSelected: { color: Palette.primary },
   weekOptionMeta: { fontSize: 12, color: Palette.textSecondary, marginTop: 2 },
+
+  // Interactive additions
+  moreBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  addBtn: { height: 36, paddingHorizontal: Spacing.md, backgroundColor: Palette.primary, borderRadius: Radius.sm, alignItems: 'center', justifyContent: 'center' },
+  addBtnText: { fontSize: 13, fontWeight: '600', color: Palette.textOnPrimary },
+  dayTaskCount: { fontSize: 12, color: Palette.textSecondary, marginTop: 2 },
+  dayProgressBar: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  actionCard: { backgroundColor: Palette.surface, borderRadius: Radius.lg, padding: Spacing.lg, width: '100%', maxWidth: 320, gap: Spacing.sm, alignItems: 'center', alignSelf: 'center' },
+  actionTitle: { fontSize: 17, fontWeight: '700', color: Palette.textPrimary, marginBottom: Spacing.xs },
+  actionBtn: { width: '100%', height: 44, borderRadius: Radius.sm, borderWidth: 1, borderColor: Palette.border, alignItems: 'center', justifyContent: 'center', backgroundColor: Palette.surface },
+  actionBtnText: { fontSize: 15, fontWeight: '500', color: Palette.textPrimary },
+  actionBtnDanger: { borderColor: Palette.errorLight, backgroundColor: Palette.errorLight },
+  actionBtnDangerText: { fontSize: 15, fontWeight: '500', color: Palette.error },
+  deleteMsg: { fontSize: 14, color: Palette.textSecondary, textAlign: 'center', lineHeight: 20 },
+  deleteActions: { flexDirection: 'row', gap: Spacing.sm, width: '100%' },
+  formScroll: { padding: Spacing.lg, gap: Spacing.md, maxWidth: Platform.OS === 'web' ? 480 : undefined, alignSelf: Platform.OS === 'web' ? 'center' : undefined, width: Platform.OS === 'web' ? '100%' : undefined, paddingBottom: Spacing.xxl },
+  formHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  formTitle: { fontSize: 20, fontWeight: '700', color: Palette.textPrimary },
+  formCancel: { fontSize: 15, color: Palette.primary, fontWeight: '500' },
+  moveWarning: { fontSize: 13, color: Palette.textSecondary, lineHeight: 18, textAlign: 'center', paddingVertical: Spacing.sm },
+  errorBox: { backgroundColor: Palette.errorLight, borderRadius: Radius.sm, padding: Spacing.sm },
+  errorBoxText: { fontSize: 14, color: Palette.error, textAlign: 'center' },
+  fieldGroup: { gap: Spacing.xs },
+  label: { fontSize: 14, fontWeight: '500', color: Palette.textPrimary },
+  input: { height: 48, borderWidth: 1, borderColor: Palette.border, borderRadius: Radius.sm, paddingHorizontal: Spacing.md, fontSize: 16, color: Palette.textPrimary, backgroundColor: Palette.surface },
+  dateRow: { flexDirection: 'row', gap: Spacing.sm },
+  dateCol: { flex: 1 },
+  pickerContainer: { borderWidth: 1, borderColor: Palette.border, borderRadius: Radius.sm, backgroundColor: Palette.surface, overflow: 'hidden' },
+  pickerInner: { height: 48 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: Radius.full, borderWidth: 1, borderColor: Palette.border, backgroundColor: Palette.surface },
+  chipSelected: { backgroundColor: Palette.primaryLight, borderColor: Palette.primary },
+  chipText: { fontSize: 13, color: Palette.textSecondary, fontWeight: '500' },
+  chipTextSelected: { color: Palette.primary },
+  routineItem: { backgroundColor: Palette.surface, borderRadius: Radius.md, padding: Spacing.md, borderWidth: 1, borderColor: Palette.border, marginBottom: Spacing.sm },
+  routineItemText: { fontSize: 15, fontWeight: '600', color: Palette.textPrimary },
+  saveBtn: { height: 48, backgroundColor: Palette.primary, borderRadius: Radius.sm, alignItems: 'center', justifyContent: 'center', marginTop: Spacing.sm },
+  saveBtnPressed: { backgroundColor: Palette.primaryDark },
+  saveBtnDisabled: { opacity: 0.6 },
+  saveBtnText: { fontSize: 16, fontWeight: '600', color: Palette.textOnPrimary },
 });
